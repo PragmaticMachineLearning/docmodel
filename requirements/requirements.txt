@@ -4,3 +4,7 @@ regex
 torch
 tensorflow
 tqdm
+jax
+flax
+fire
+
