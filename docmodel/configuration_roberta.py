@@ -17,9 +17,9 @@
 from collections import OrderedDict
 from typing import Mapping
 
-from ...onnx import OnnxConfig
-from ...utils import logging
-from ..bert.configuration_bert import BertConfig
+from transformers.onnx import OnnxConfig
+from transformers.utils import logging
+from transformers.models.bert.configuration_bert import BertConfig
 
 
 logger = logging.get_logger(__name__)

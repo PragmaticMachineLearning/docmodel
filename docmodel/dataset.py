@@ -5,11 +5,12 @@ import random
 
 import torch
 import PIL
-from transformers.models.layoutlmv2 import LayoutLMv2Tokenizer, LayoutLMv2Processor
+from transformers.models.layoutlmv2 import LayoutLMv2Processor
 from PIL import Image
 from torch.utils.data import Dataset
 
-from .etl_utils import use_reading_order
+from docmodel.etl_utils import use_reading_order
+from docmodel.tokenization_layoutlmv2 import CustomLayoutLMv2Tokenizer
 
 # Stackoverflow magic number -- not sure if this is the absolute max or not
 PIL.Image.MAX_IMAGE_PIXELS = 933120000
@@ -17,7 +18,7 @@ PIL.Image.MAX_IMAGE_PIXELS = 933120000
 processor = LayoutLMv2Processor.from_pretrained(
     "microsoft/layoutlmv2-base-uncased", revision="no_ocr"
 )
-tokenizer = LayoutLMv2Tokenizer.from_pretrained("microsoft/layoutlmv2-base-uncased")
+tokenizer = CustomLayoutLMv2Tokenizer.from_pretrained("microsoft/layoutlmv2-base-uncased")
 
 
 
@@ -79,6 +80,7 @@ class PageChunkDataset(Dataset):
         dataset_size=None,
         stride=None,
         reading_order="default",
+        include_2d_data=True,
         seed=42,
     ):
         if isinstance(directory, str):
@@ -101,6 +103,7 @@ class PageChunkDataset(Dataset):
         self.reading_order = reading_order
         self.per_chunk_length = per_chunk_length
         self.seen_filepaths = []
+        self.include_2d_data = include_2d_data
 
     def __len__(self):
         return len(self.filepaths)
@@ -126,6 +129,7 @@ class PageChunkDataset(Dataset):
             encoded_inputs["bbox"],
             order=self.reading_order,
         )
+
         input_mask = encoded_inputs["input_ids"] != 0
 
         # Empty pages represented as empty pad token
@@ -134,7 +138,8 @@ class PageChunkDataset(Dataset):
 
         # Should ideally fix upstream
         encoded_inputs["input_ids"] = encoded_inputs["input_ids"][input_mask]
-        encoded_inputs["bbox"] = encoded_inputs["bbox"][input_mask]
+        if self.include_2d_data:
+            encoded_inputs["bbox"] = encoded_inputs["bbox"][input_mask]
 
         tokens_per_chunk = self.max_length - self.num_special_tokens
         candidate_start_indices = [0] + list(
@@ -146,6 +151,7 @@ class PageChunkDataset(Dataset):
         )
         start_index = random.choice(candidate_start_indices)
         end_index = start_index + tokens_per_chunk
+        
         sliced_input = tokenizer.prepare_for_model(
             encoded_inputs["input_ids"][start_index:end_index].tolist(),
             boxes=encoded_inputs["bbox"][start_index:end_index].tolist(),

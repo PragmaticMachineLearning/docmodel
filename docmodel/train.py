@@ -3,7 +3,10 @@ from transformers import TrainingArguments,LayoutLMv2Tokenizer
 from collator import DataCollatorForWholeWordMask
 import fire
 import torch
-from doc_model import DocModelForMLM, DocModelConfig
+from docmodel.doc_model import DocModelForMLM, DocModelConfig
+from docmodel.modeling_roberta import RobertaForMaskedLM
+from docmodel.configuration_roberta import RobertaConfig
+from docmodel.tokenization_roberta import RobertaTokenizer
 from trainer import CustomTrainer
 
 MODEL_CONFIG = {
@@ -14,9 +17,29 @@ MODEL_CONFIG = {
         "batch_size": 8,
         "eval_batch_size": 4,
         "max_length": 512,
-        "from_scratch": True,
         "gradient_accumulation_steps": 1,
+        "tokenizer": LayoutLMv2Tokenizer.from_pretrained,
+        "tokenizer_kwargs": {
+            "pretrained_model_name_or_path": "microsoft/layoutlmv2-base-uncased"
+        }
+        # 'pretrained_checkpoint': 'roberta-base'
     },
+    "roberta": {
+        "model": RobertaForMaskedLM,
+        "config": RobertaConfig,
+        "dataset": PageChunkDataset,
+        "batch_size": 8,
+        "eval_batch_size": 4,
+        "max_length": 512,
+        "gradient_accumulation_steps": 1,
+        "collator_kwargs": {
+            "include_2d_data": False
+        },
+        "tokenizer": RobertaTokenizer.from_pretrained,
+        "tokenizer_kwargs": {
+            "pretrained_model_name_or_path": "roberta-base",
+        } 
+    }
 }
 
 
@@ -33,7 +56,7 @@ def main(
     gradient_checkpointing=True,
     pretrained_checkpoint=None,
     base_model="doc_model",
-    from_scratch=False,
+    from_scratch=True,
     reading_order="default",
     num_train_epochs=1.0,
     learning_rate=1e-5,  # 2e-5
@@ -48,7 +71,7 @@ def main(
     # TODO: start training from random initialization
     # TODO: incorporate other objectives
     model_config = MODEL_CONFIG[base_model]
-    pretrained_checkpoint = pretrained_checkpoint or model_config['pretrained_checkpoint']
+    pretrained_checkpoint = pretrained_checkpoint or model_config.get('pretrained_checkpoint')
     model_cls = model_config['model']
     if from_scratch:
         cfg = model_config["config"]
@@ -63,10 +86,9 @@ def main(
     per_device_batch_size = batch_size or model_config['batch_size']
     gradient_accumulation_steps = gradient_accumulation_steps or model_config['gradient_accumulation_steps']
 
-    # TODO: verify that tokenizer has desired properties
-    tokenizer = LayoutLMv2Tokenizer.from_pretrained(
-        "microsoft/layoutlmv2-base-uncased",
-        model_max_length=model_config['max_length'],
+    tokenizer = model_config['tokenizer'](
+        model_max_length=model_config['max_length'], 
+        **model_config["tokenizer_kwargs"]
     )
     args = TrainingArguments(
         output_dir=experiment_name,
@@ -87,11 +109,14 @@ def main(
         warmup_ratio=warmup_ratio,
         weight_decay=weight_decay,
     )
+    collator_kwargs = model_config.get('collator_kwargs', {})
     collator = DataCollatorForWholeWordMask(
         tokenizer=tokenizer,
         mlm_probability=mlm_proba,
+        **collator_kwargs
     )
     dataset_cls = model_config['dataset']
+
     train_dataset = dataset_cls(
         directory=data_dir,
         split="train",

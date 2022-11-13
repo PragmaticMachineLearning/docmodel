@@ -81,6 +81,7 @@ class DataCollatorForWholeWordMask:
     position_mask_probability: float = 0.15
     pad_to_multiple_of: Optional[int] = None
     tf_experimental_compile: bool = False
+    include_2d_data: Optional[bool] = True
 
     def __post_init__(self):
         if self.mlm and self.tokenizer.mask_token is None:
@@ -143,6 +144,12 @@ class DataCollatorForWholeWordMask:
                     if key != "image"
                     else None,
                 )
+        
+        if not self.include_2d_data:
+            del result['bbox']
+            del result['bbox_labels']
+            del result['image']
+        
         return result
 
     def _whole_word_mask(

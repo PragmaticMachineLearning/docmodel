@@ -164,33 +164,7 @@ class CustomTrainer(Trainer):
 
         inputs = self._prepare_inputs(inputs)
 
-        if self.visualization_dir and self.visualize_inputs:
-            batch_size = inputs["input_ids"].shape[0]
-            for i in range(batch_size):
-                img = inputs["image"][i].transpose(0, 2).transpose(0, 1).cpu().numpy()
-                pil_img = Image.fromarray(img)
-                canvas = ImageDraw.Draw(pil_img, "RGB")
-                for j, (bbox, label) in enumerate(
-                    zip(inputs["bbox"][i], inputs["labels"][i])
-                ):
-                    bbox = unnormalize_bbox(bbox, 224, 224)
-                    color_index = j // 512
-                    colors = ["red", "orange", "yellow", "green"]
-                    color = colors[color_index] if color_index < len(colors) else "blue"
-                    canvas.rectangle(
-                        bbox,
-                        fill="green" if label != -100 else None,
-                        outline=color,
-                        width=1,
-                    )
-                uid = uuid.uuid4().hex
-                pil_img.save(os.path.join(self.visualization_dir, f"{uid}.png"))
-
-        if self.use_amp:
-            with autocast():
-                loss = self.compute_loss(model, inputs)
-        else:
-            loss = self.compute_loss(model, inputs)
+        loss = self.compute_loss(model, inputs)
 
         if self.args.n_gpu > 1:
             loss = loss.mean()  # mean() to average on multi-gpu parallel training
@@ -199,9 +173,7 @@ class CustomTrainer(Trainer):
             # deepspeed handles loss scaling by gradient_accumulation_steps in its `backward`
             loss = loss / self.args.gradient_accumulation_steps
 
-        if self.use_amp:
-            self.scaler.scale(loss).backward()
-        elif self.use_apex:
+        if self.use_apex:
             with amp.scale_loss(loss, self.optimizer) as scaled_loss:
                 scaled_loss.backward()
         elif self.deepspeed:
