@@ -18,7 +18,14 @@ def find_words_in_text(words: list[str], text: str) -> list[tuple[int, int]]:
     Returns:
         tuple[int, int]: start and end offsets into the text
     """
-    pass
+    offset = 0
+    offsets = []
+    for word in words:
+        start_offset = text.find(word, offset)
+        end_offset = len(word)
+        offsets.append((start_offset, end_offset))
+        offset = end_offset
+    return offsets
 
 
 def text_from_layoutlmv2_token_ids(token_ids: list[int]) -> str:
@@ -123,7 +130,7 @@ def translate_to_roberta(
         list[int]: roberta tokens
         list[list[int]]: roberta bounding box info
     """
-    text = text_from_layoutlmv2_tokens(layoutlmv2_tokens)
+    text = text_from_layoutlmv2_token_ids(layoutlmv2_tokens)
     roberta_tokens, roberta_offsets = roberta_info_from_text(text)
     roberta_bbox = translate_bbox_info(
         text, layoutlmv2_tokens, layoutlmv2_bbox_info, roberta_tokens, roberta_offsets
