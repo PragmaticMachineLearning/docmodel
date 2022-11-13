@@ -1,3 +1,4 @@
+from re import L
 from transformers import LayoutLMv2TokenizerFast, RobertaTokenizerFast
 from transformers import BatchEncoding
 import torch
@@ -43,7 +44,8 @@ def text_from_layoutlmv2_token_ids(token_ids: list[int]) -> str:
 
 def roberta_info_from_text(text: str) -> tuple[list[int], list[tuple[int, int]]]:
     """
-    TODO: deal with padding
+    TODO: deal with padding tokens
+    (is there an argument you can pass to disable this behavior?)
 
     Args:
         text (str): original text
@@ -62,20 +64,36 @@ def layoutlmv2_tokens_from_ids(ids: list[int]) -> list[str]:
     return layoutlmv2_tokens
 
 
+def overlap(a: tuple[int, int], b: tuple[int, int]) -> bool:
+    """
+    WARNING: be careful about boundary conditions (e.g. < vs. <=)
+    TODO: read this function until you understand it
+
+    Examples:
+        a: []
+        b: ()
+
+        [ ( ] ): overlap(a=(1, 3), b=(2, 4)) -> True
+        [ ( ) ]: overlap(a=(1, 5), b=(2, 4)) -> True
+        [  ]( ): overlap(a=(1, 5), b=(5, 6)) -> False
+
+    Args:
+        a (tuple[int, int]): start and end offset
+        b (tuple[int, int]): start and end offset
+
+    Returns:
+        bool: do the two elements overlap
+    """
+    return a[0] < b[1] and b[0] < a[1]
+
+
 def bbox_from_offset_alignment(
-    layoutlmv2_offests: list[tuple[int, int]],
-    roberta_offests: list[tuple[int, int]],
+    layoutlmv2_offsets: list[tuple[int, int]],
+    roberta_offsets: list[tuple[int, int]],
     layoutlmv2_bbox_info: list[list[int]],
 ) -> list[list[int]]:
     """
-    Pseudocode:
-
-    Initialize result
-    For each offset in roberta offsets:
-        Find index of best match (one that overlaps most) in layoutlmv2 offests:
-            Lookup bbox info at that index
-            Add to result
-    Return result
+    NOTE: Try first with sample data
 
     Args:
         layoutlmv2_offests (list[tuple[int, int]]): _description_
@@ -85,14 +103,25 @@ def bbox_from_offset_alignment(
     Returns:
         list[list[int]]: _description_
     """
-    pass
+    results = []
+    for offset in roberta_offsets:
+        # TODO: make me more efficient by not checking offsets that we
+        # know aren't valid and taking advantage of the fact that
+        # these two lists are ordered
+        for idx, layoutlmv2_offset in enumerate(layoutlmv2_offsets):
+            if overlap(offset, layoutlmv2_offset):
+                bbox_info = layoutlmv2_bbox_info[idx]
+                results.append(bbox_info)
+                break
+        else:
+            raise AssertionError("Failed to find a match -- this should never happen")
+    return results
 
 
 def translate_bbox_info(
     text: str,
     layoutlmv2_token_ids: list[int],
     layoutlmv2_bbox_info: list[list[int]],
-    roberta_token_ids: list[int],
     roberta_offsets: list[tuple[int, int]],
 ) -> list[list[int]]:
     """_summary_
@@ -133,7 +162,7 @@ def translate_to_roberta(
     text = text_from_layoutlmv2_token_ids(layoutlmv2_tokens)
     roberta_tokens, roberta_offsets = roberta_info_from_text(text)
     roberta_bbox = translate_bbox_info(
-        text, layoutlmv2_tokens, layoutlmv2_bbox_info, roberta_tokens, roberta_offsets
+        text, layoutlmv2_tokens, layoutlmv2_bbox_info, roberta_offsets
     )
     return roberta_tokens, roberta_bbox
 
