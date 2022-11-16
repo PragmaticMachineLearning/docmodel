@@ -42,8 +42,6 @@ def text_from_layoutlmv2_token_ids(token_ids: list[int]) -> str:
         str: original document text
     """
     result: list = LAYOUTLM_V2_TOKENIZER.decode(token_ids, skip_special_tokens = True)
-    # conv2str = conv2str.replace('[PAD]', '<s>')
-    # print(f'conv2str {conv2str}')
     return result
 
 def roberta_info_from_text(text: str) -> tuple[list[int], list[tuple[int, int]]]:
@@ -66,7 +64,6 @@ def layoutlmv2_tokens_from_ids(ids: list[int]) -> list[str]:
     # Deal with padding and "##" symbols in the output tokens
     layoutlmv2_tokens: list = LAYOUTLM_V2_TOKENIZER.convert_ids_to_tokens(ids, skip_special_tokens = True)
     layoutlmv2_tokens = [t.replace('##', '') for t in layoutlmv2_tokens]
-    # print(f'tokens_to_str {tokens_to_str}')
     return layoutlmv2_tokens
 
 def overlap(a: tuple[int, int], b: tuple[int, int]) -> bool:
@@ -119,7 +116,6 @@ def bbox_from_offset_alignment(
             results.append([0,0,0,0])
             continue 
             
-        # question: How do we know offsets that aren't valid?
         for idx, layoutlmv2_offset in enumerate(layoutlmv2_offsets[layoutlmv2_search_start:]):
             adjusted_idx = idx+layoutlmv2_search_start
             if overlap(offset, layoutlmv2_offset):
@@ -155,7 +151,6 @@ def translate_bbox_info(
     layoutlmv2_offsets: list[tuple[int, int]] = find_words_in_text(
         layoutlmv2_tokens, text
     )
-    print('-' *100)
     roberta_bbox_info: list[list[int]] = bbox_from_offset_alignment(
         layoutlmv2_offsets, roberta_offsets, layoutlmv2_bbox_info
     )
