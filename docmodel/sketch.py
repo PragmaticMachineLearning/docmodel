@@ -23,7 +23,9 @@ def find_words_in_text(words: list[str], text: str) -> list[tuple[int, int]]:
     offsets = []
     for word in words:
         start_offset = text.find(word, offset)
-        end_offset = len(word)
+        if start_offset == -1:
+            raise AssertionError(f'failed to find {word} in text')
+        end_offset = start_offset + len(word)
         offsets.append((start_offset, end_offset))
         offset = end_offset
     return offsets
@@ -39,8 +41,10 @@ def text_from_layoutlmv2_token_ids(token_ids: list[int]) -> str:
     Returns:
         str: original document text
     """
-    return LAYOUTLM_V2_TOKENIZER.decode(token_ids)
-
+    result: list = LAYOUTLM_V2_TOKENIZER.decode(token_ids, skip_special_tokens = True)
+    # conv2str = conv2str.replace('[PAD]', '<s>')
+    # print(f'conv2str {conv2str}')
+    return result
 
 def roberta_info_from_text(text: str) -> tuple[list[int], list[tuple[int, int]]]:
     """
@@ -60,9 +64,10 @@ def roberta_info_from_text(text: str) -> tuple[list[int], list[tuple[int, int]]]
 
 def layoutlmv2_tokens_from_ids(ids: list[int]) -> list[str]:
     # Deal with padding and "##" symbols in the output tokens
-    layoutlmv2_tokens = LAYOUTLM_V2_TOKENIZER.convert_ids_to_tokens(ids)
+    layoutlmv2_tokens: list = LAYOUTLM_V2_TOKENIZER.convert_ids_to_tokens(ids, skip_special_tokens = True)
+    layoutlmv2_tokens = [t.replace('##', '') for t in layoutlmv2_tokens]
+    # print(f'tokens_to_str {tokens_to_str}')
     return layoutlmv2_tokens
-
 
 def overlap(a: tuple[int, int], b: tuple[int, int]) -> bool:
     """
@@ -104,17 +109,27 @@ def bbox_from_offset_alignment(
         list[list[int]]: _description_
     """
     results = []
+    layoutlmv2_search_start = 0
     for offset in roberta_offsets:
         # TODO: make me more efficient by not checking offsets that we
         # know aren't valid and taking advantage of the fact that
         # these two lists are ordered
-        for idx, layoutlmv2_offset in enumerate(layoutlmv2_offsets):
+        if offset == (0,0):
+            # NOTE: this depends on what X-doc suggests
+            results.append([0,0,0,0])
+            continue 
+            
+        # question: How do we know offsets that aren't valid?
+        for idx, layoutlmv2_offset in enumerate(layoutlmv2_offsets[layoutlmv2_search_start:]):
+            adjusted_idx = idx+layoutlmv2_search_start
             if overlap(offset, layoutlmv2_offset):
-                bbox_info = layoutlmv2_bbox_info[idx]
+                bbox_info = layoutlmv2_bbox_info[adjusted_idx]
                 results.append(bbox_info)
+                layoutlmv2_search_start = adjusted_idx
                 break
         else:
             raise AssertionError("Failed to find a match -- this should never happen")
+
     return results
 
 
@@ -130,16 +145,17 @@ def translate_bbox_info(
         text (str): original text
         layoutlmv2_tokens (list[int]): _description_
         layoutlmv2_bbox_info (list[list[int]]): _description_
-        roberta_tokens (list[int]): _description_
         roberta_offsets (list[tuple[int, int]]): start and end offsets into the text
     Returns:
         list[list[int]]: roberta bbox info
     """
 
     layoutlmv2_tokens: list[str] = layoutlmv2_tokens_from_ids(layoutlmv2_token_ids)
+    
     layoutlmv2_offsets: list[tuple[int, int]] = find_words_in_text(
         layoutlmv2_tokens, text
     )
+    print('-' *100)
     roberta_bbox_info: list[list[int]] = bbox_from_offset_alignment(
         layoutlmv2_offsets, roberta_offsets, layoutlmv2_bbox_info
     )
@@ -147,7 +163,7 @@ def translate_bbox_info(
 
 
 def translate_to_roberta(
-    layoutlmv2_tokens: list[int], layoutlmv2_bbox_info: list[list[int]]
+    layoutlmv2_tokens_ids: list[int], layoutlmv2_bbox_info: list[list[int]]
 ) -> tuple[list[int], list[list[int]]]:
     """
 
@@ -156,15 +172,15 @@ def translate_to_roberta(
         layoutlmv2_bbox_info (list[list[int]]): _description_
 
     Returns:
-        list[int]: roberta tokens
+        list[int]: roberta tokens ids
         list[list[int]]: roberta bounding box info
     """
-    text = text_from_layoutlmv2_token_ids(layoutlmv2_tokens)
-    roberta_tokens, roberta_offsets = roberta_info_from_text(text)
+    text = text_from_layoutlmv2_token_ids(layoutlmv2_tokens_ids)
+    roberta_tokens_ids, roberta_offsets = roberta_info_from_text(text)
     roberta_bbox = translate_bbox_info(
-        text, layoutlmv2_tokens, layoutlmv2_bbox_info, roberta_offsets
+        text, layoutlmv2_tokens_ids, layoutlmv2_bbox_info, roberta_offsets
     )
-    return roberta_tokens, roberta_bbox
+    return roberta_tokens_ids, roberta_bbox
 
 
 def convert_to_new_dataset(old_filepath: str, new_filepath: str):
@@ -180,7 +196,7 @@ def convert_to_new_dataset(old_filepath: str, new_filepath: str):
     """
     data = torch.load(old_filepath)
     roberta_tokens, roberta_bbox_info = translate_to_roberta(
-        data["input_ids"], data["bbox"]
+        data["input_ids"][0], data["bbox"][0]
     )
     torch.save(
         {
