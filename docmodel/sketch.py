@@ -1,7 +1,11 @@
-from re import L
 from transformers import LayoutLMv2TokenizerFast, RobertaTokenizerFast
 from transformers import BatchEncoding
 import torch
+import glob
+import fire
+import time
+import os
+from concurrent.futures import ProcessPoolExecutor, as_completed
 
 LAYOUTLM_V2_TOKENIZER = LayoutLMv2TokenizerFast.from_pretrained(
     "microsoft/layoutlmv2-base-uncased"
@@ -24,7 +28,7 @@ def find_words_in_text(words: list[str], text: str) -> list[tuple[int, int]]:
     for word in words:
         start_offset = text.find(word, offset)
         if start_offset == -1:
-            raise AssertionError(f'failed to find {word} in text')
+            raise AssertionError(f"failed to find {word} in text")
         end_offset = start_offset + len(word)
         offsets.append((start_offset, end_offset))
         offset = end_offset
@@ -41,8 +45,8 @@ def text_from_layoutlmv2_token_ids(token_ids: list[int]) -> str:
     Returns:
         str: original document text
     """
-    result: list = LAYOUTLM_V2_TOKENIZER.decode(token_ids, skip_special_tokens = True)
-    return result
+    return LAYOUTLM_V2_TOKENIZER.decode(token_ids, skip_special_tokens=True)
+
 
 def roberta_info_from_text(text: str) -> tuple[list[int], list[tuple[int, int]]]:
     """
@@ -62,9 +66,12 @@ def roberta_info_from_text(text: str) -> tuple[list[int], list[tuple[int, int]]]
 
 def layoutlmv2_tokens_from_ids(ids: list[int]) -> list[str]:
     # Deal with padding and "##" symbols in the output tokens
-    layoutlmv2_tokens: list = LAYOUTLM_V2_TOKENIZER.convert_ids_to_tokens(ids, skip_special_tokens = True)
-    layoutlmv2_tokens = [t.replace('##', '') for t in layoutlmv2_tokens]
+    layoutlmv2_tokens: list = LAYOUTLM_V2_TOKENIZER.convert_ids_to_tokens(
+        ids, skip_special_tokens=True
+    )
+    layoutlmv2_tokens = [t.replace("##", "") for t in layoutlmv2_tokens]
     return layoutlmv2_tokens
+
 
 def overlap(a: tuple[int, int], b: tuple[int, int]) -> bool:
     """
@@ -86,7 +93,7 @@ def overlap(a: tuple[int, int], b: tuple[int, int]) -> bool:
     Returns:
         bool: do the two elements overlap
     """
-    return a[0] < b[1] and b[0] < a[1]
+    return a[0] <= b[1] and b[0] <= a[1]
 
 
 def bbox_from_offset_alignment(
@@ -111,13 +118,15 @@ def bbox_from_offset_alignment(
         # TODO: make me more efficient by not checking offsets that we
         # know aren't valid and taking advantage of the fact that
         # these two lists are ordered
-        if offset == (0,0):
+        if offset == (0, 0):
             # NOTE: this depends on what X-doc suggests
-            results.append([0,0,0,0])
-            continue 
-            
-        for idx, layoutlmv2_offset in enumerate(layoutlmv2_offsets[layoutlmv2_search_start:]):
-            adjusted_idx = idx+layoutlmv2_search_start
+            results.append([0, 0, 0, 0])
+            continue
+
+        for idx, layoutlmv2_offset in enumerate(
+            layoutlmv2_offsets[layoutlmv2_search_start:]
+        ):
+            adjusted_idx = idx + layoutlmv2_search_start
             if overlap(offset, layoutlmv2_offset):
                 bbox_info = layoutlmv2_bbox_info[adjusted_idx]
                 results.append(bbox_info)
@@ -147,7 +156,7 @@ def translate_bbox_info(
     """
 
     layoutlmv2_tokens: list[str] = layoutlmv2_tokens_from_ids(layoutlmv2_token_ids)
-    
+
     layoutlmv2_offsets: list[tuple[int, int]] = find_words_in_text(
         layoutlmv2_tokens, text
     )
@@ -178,7 +187,7 @@ def translate_to_roberta(
     return roberta_tokens_ids, roberta_bbox
 
 
-def convert_to_new_dataset(old_filepath: str, new_filepath: str):
+def convert_to_new_dataset(old_filepath: str, new_filepath: str, override=False):
     """
     New dataset contains:
     - RoBERTa token IDs
@@ -189,6 +198,9 @@ def convert_to_new_dataset(old_filepath: str, new_filepath: str):
         old_filepath (str): filepath of layoutlmv2 dataset file
         new_filepath (str): filepath of roberta-based dataset file
     """
+    if os.path.exists(new_filepath) and not override:
+        return
+
     data = torch.load(old_filepath)
     roberta_tokens, roberta_bbox_info = translate_to_roberta(
         data["input_ids"][0], data["bbox"][0]
@@ -203,8 +215,33 @@ def convert_to_new_dataset(old_filepath: str, new_filepath: str):
     )
 
 
+def main(pattern, n_cores=12):
+    pool = ProcessPoolExecutor(n_cores)
+    sample_files = glob.glob(pattern, recursive=True) * 12
+    start = time.time()
+    futures = {}
+    for file in sample_files:
+        future = pool.submit(
+            convert_to_new_dataset,
+            file,
+            f"/tmp/{os.path.basename(file)}",
+            override=True,
+        )
+        futures[future] = file
+
+    for future in as_completed(futures):
+        future.result()
+        file = futures[future]
+        print(f"Completed processing {file}")
+
+    end = time.time()
+    total_time = end - start
+    avg_time = total_time / len(sample_files)
+    full_dataset_time = (avg_time * 40_000_000) / 3600
+    print(f"Total time: {total_time:.2f}")
+    print(f"Average time: {avg_time:.2f}")
+    print(f"Estimated time for 40M files: {full_dataset_time:0.2f} hours")
+
+
 if __name__ == "__main__":
-    convert_to_new_dataset(
-        "docrep-tiny/test/bf5852f352d070465fa0aac4e3f8373d2c04844de4e4c82feece5325-0.pt",
-        "sample-roberta-output.pt",
-    )
+    fire.Fire(main)
