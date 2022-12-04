@@ -5,7 +5,9 @@ import glob
 import fire
 import time
 import os
-from concurrent.futures import ProcessPoolExecutor, as_completed
+from concurrent.futures import ProcessPoolExecutor, as_completed, ThreadPoolExecutor
+import warnings
+
 
 LAYOUTLM_V2_TOKENIZER = LayoutLMv2TokenizerFast.from_pretrained(
     "microsoft/layoutlmv2-base-uncased"
@@ -25,8 +27,12 @@ def find_words_in_text(words: list[str], text: str) -> list[tuple[int, int]]:
     """
     offset = 0
     offsets = []
+    lower_case = text.lower()
+    upper_case = text.upper()
     for word in words:
-        start_offset = text.find(word, offset)
+        start_offset = lower_case.find(word.lower(), offset)
+        if start_offset == -1:
+            start_offset = upper_case.find(word.upper(), offset)
         if start_offset == -1:
             raise AssertionError(f"failed to find {word} in text")
         end_offset = start_offset + len(word)
@@ -121,6 +127,7 @@ def bbox_from_offset_alignment(
         if offset == (0, 0):
             # NOTE: this depends on what X-doc suggests
             results.append([0, 0, 0, 0])
+        
             continue
 
         for idx, layoutlmv2_offset in enumerate(
@@ -133,8 +140,9 @@ def bbox_from_offset_alignment(
                 layoutlmv2_search_start = adjusted_idx
                 break
         else:
-            raise AssertionError("Failed to find a match -- this should never happen")
-
+            warnings.warn(f"failed to find a match for {offset}")
+            results.append([0,0,0,0])
+    
     return results
 
 
@@ -160,14 +168,18 @@ def translate_bbox_info(
     layoutlmv2_offsets: list[tuple[int, int]] = find_words_in_text(
         layoutlmv2_tokens, text
     )
-    roberta_bbox_info: list[list[int]] = bbox_from_offset_alignment(
-        layoutlmv2_offsets, roberta_offsets, layoutlmv2_bbox_info
-    )
+    try: 
+        roberta_bbox_info: list[list[int]] = bbox_from_offset_alignment(
+            layoutlmv2_offsets, roberta_offsets, layoutlmv2_bbox_info
+        )
+    except Exception:
+        raise AssertionError
+
     return roberta_bbox_info
 
 
 def translate_to_roberta(
-    layoutlmv2_tokens_ids: list[int], layoutlmv2_bbox_info: list[list[int]]
+    layoutlmv2_tokens_ids: list[int], layoutlmv2_bbox_info: list[list[int]], text: str
 ) -> tuple[list[int], list[list[int]]]:
     """
 
@@ -179,12 +191,33 @@ def translate_to_roberta(
         list[int]: roberta tokens ids
         list[list[int]]: roberta bounding box info
     """
-    text = text_from_layoutlmv2_token_ids(layoutlmv2_tokens_ids)
     roberta_tokens_ids, roberta_offsets = roberta_info_from_text(text)
     roberta_bbox = translate_bbox_info(
         text, layoutlmv2_tokens_ids, layoutlmv2_bbox_info, roberta_offsets
     )
     return roberta_tokens_ids, roberta_bbox
+
+def get_text_from_file(unique_id: str, page_num: int, split: str = 'test') -> str:
+    
+    file_name = f'docrep-tiny2/{split}/{unique_id}-{page_num}.txt'
+    file_path = os.path.join(os.path.dirname(__file__),file_name)
+    with open(file_path) as f:
+        text = f.read()
+    return text
+
+def get_file_meta_from_file_path(file_path: str) -> dict[str, str]:
+    splits = ['train', 'test', 'valid']
+    file_parts = file_path.split('/')
+    data_split = None
+    for split in splits:
+        if split in file_parts:
+            data_split = split
+            break
+    unique_id, rest = os.path.basename(file_path).split('-')
+    page_num = rest.split('.')[0]
+    return {'unique_id': unique_id, 'page_num': page_num, 'data_split': data_split}
+    
+
 
 
 def convert_to_new_dataset(old_filepath: str, new_filepath: str, override=False):
@@ -202,9 +235,13 @@ def convert_to_new_dataset(old_filepath: str, new_filepath: str, override=False)
         return
 
     data = torch.load(old_filepath)
+    meta = get_file_meta_from_file_path(old_filepath)
+    text = get_text_from_file(meta['unique_id'], meta['page_num'], meta['data_split'])
+    
     roberta_tokens, roberta_bbox_info = translate_to_roberta(
-        data["input_ids"][0], data["bbox"][0]
+        data["input_ids"][0], data["bbox"][0], text = text
     )
+    
     torch.save(
         {
             "input_ids": roberta_tokens,
@@ -215,8 +252,8 @@ def convert_to_new_dataset(old_filepath: str, new_filepath: str, override=False)
     )
 
 
-def main(pattern, n_cores=12):
-    pool = ProcessPoolExecutor(n_cores)
+def main(pattern, n_cores=10):
+    pool = ThreadPoolExecutor(n_cores)
     sample_files = glob.glob(pattern, recursive=True) * 12
     start = time.time()
     futures = {}
