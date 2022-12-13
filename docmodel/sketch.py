@@ -7,13 +7,30 @@ import time
 import os
 from concurrent.futures import ProcessPoolExecutor, as_completed, ThreadPoolExecutor
 import warnings
+import unicodedata
 
+class TokenConversionError(ValueError):
+    pass
 
 LAYOUTLM_V2_TOKENIZER = LayoutLMv2TokenizerFast.from_pretrained(
     "microsoft/layoutlmv2-base-uncased"
 )
 ROBERTA_TOKENIZER = RobertaTokenizerFast.from_pretrained("roberta-base")
 
+'''def check_str_items(s1: str, s2: str) -> bool:
+    if len(s1) != len(s2):
+        return
+    not_present = []
+    for ele in s1:
+        if ele not in s2:
+            not_present.append(ele)
+    print(not_present)
+    n = len(s1)
+    for i in range(n):
+        if s1[i] != s2[i]:
+            return False
+    
+    return True'''
 
 def find_words_in_text(words: list[str], text: str) -> list[tuple[int, int]]:
     """_summary_
@@ -28,17 +45,40 @@ def find_words_in_text(words: list[str], text: str) -> list[tuple[int, int]]:
     offset = 0
     offsets = []
     lower_case = text.lower()
-    upper_case = text.upper()
+    stripped_accents = _run_strip_accents(lower_case)
+    assert len(stripped_accents) == len(lower_case)
     for word in words:
-        start_offset = lower_case.find(word.lower(), offset)
-        if start_offset == -1:
-            start_offset = upper_case.find(word.upper(), offset)
+        start_offset = stripped_accents.find(word.lower(), offset)
         if start_offset == -1:
             raise AssertionError(f"failed to find {word} in text")
         end_offset = start_offset + len(word)
         offsets.append((start_offset, end_offset))
         offset = end_offset
     return offsets
+
+def _run_strip_accents(text: str) -> str:
+        """Strips accents from a piece of text."""
+        forms = ["NFC", "NFD", "NFKD", "NFKC"]
+        valid_forms = []
+        for form in forms:
+            if unicodedata.is_normalized(form, text):
+                valid_forms.append(form)
+        print(valid_forms)
+        if not valid_forms:
+            raise AssertionError
+        normalized_text = unicodedata.normalize("NFD", text)
+        assert len(normalized_text) == len(text)
+        output = []
+        for char in text:
+            cat = unicodedata.category(char)
+            if cat == "Mn":
+                raise AssertionError('category is "Mn"')
+                # if len(char) == 1:
+                #     output.append(' ')
+                continue
+            output.append(char)
+        assert len(output) == len(text)
+        return "".join(output)
 
 
 def text_from_layoutlmv2_token_ids(token_ids: list[int]) -> str:
@@ -72,10 +112,17 @@ def roberta_info_from_text(text: str) -> tuple[list[int], list[tuple[int, int]]]
 
 def layoutlmv2_tokens_from_ids(ids: list[int]) -> list[str]:
     # Deal with padding and "##" symbols in the output tokens
-    layoutlmv2_tokens: list = LAYOUTLM_V2_TOKENIZER.convert_ids_to_tokens(
-        ids, skip_special_tokens=True
-    )
+    try:
+
+        layoutlmv2_tokens: list = LAYOUTLM_V2_TOKENIZER.convert_ids_to_tokens(
+            ids, skip_special_tokens=True
+        )
+    except ValueError as e:
+        raise TokenConversionError(str(e))
+    
+    
     layoutlmv2_tokens = [t.replace("##", "") for t in layoutlmv2_tokens]
+    
     return layoutlmv2_tokens
 
 
@@ -142,7 +189,6 @@ def bbox_from_offset_alignment(
         else:
             warnings.warn(f"failed to find a match for {offset}")
             results.append([0,0,0,0])
-    
     return results
 
 
@@ -164,15 +210,17 @@ def translate_bbox_info(
     """
 
     layoutlmv2_tokens: list[str] = layoutlmv2_tokens_from_ids(layoutlmv2_token_ids)
-
-    layoutlmv2_offsets: list[tuple[int, int]] = find_words_in_text(
-        layoutlmv2_tokens, text
-    )
+    try:
+        layoutlmv2_offsets: list[tuple[int, int]] = find_words_in_text(
+            layoutlmv2_tokens, text
+        )
+    except Exception():
+        raise AssertionError
     try: 
         roberta_bbox_info: list[list[int]] = bbox_from_offset_alignment(
             layoutlmv2_offsets, roberta_offsets, layoutlmv2_bbox_info
         )
-    except Exception:
+    except Exception():
         raise AssertionError
 
     return roberta_bbox_info
@@ -233,15 +281,24 @@ def convert_to_new_dataset(old_filepath: str, new_filepath: str, override=False)
     """
     if os.path.exists(new_filepath) and not override:
         return
-
+    
     data = torch.load(old_filepath)
+    
     meta = get_file_meta_from_file_path(old_filepath)
     text = get_text_from_file(meta['unique_id'], meta['page_num'], meta['data_split'])
     
-    roberta_tokens, roberta_bbox_info = translate_to_roberta(
-        data["input_ids"][0], data["bbox"][0], text = text
-    )
-    
+    try:
+
+        roberta_tokens, roberta_bbox_info = translate_to_roberta(
+            data["input_ids"], data["bbox"], text = text
+        )
+    except TokenConversionError:
+        try:
+            roberta_tokens, roberta_bbox_info = translate_to_roberta(
+                data["input_ids"][0], data["bbox"][0], text = text
+            )
+        except:
+            pass
     torch.save(
         {
             "input_ids": roberta_tokens,
@@ -252,7 +309,7 @@ def convert_to_new_dataset(old_filepath: str, new_filepath: str, override=False)
     )
 
 
-def main(pattern, n_cores=10):
+def main(pattern, n_cores=1):
     pool = ThreadPoolExecutor(n_cores)
     sample_files = glob.glob(pattern, recursive=True) * 12
     start = time.time()
