@@ -8,16 +8,18 @@ import os
 from concurrent.futures import ProcessPoolExecutor, as_completed, ThreadPoolExecutor
 import warnings
 import unicodedata
+from typing import Any
 
 class TokenConversionError(ValueError):
     pass
+
 
 LAYOUTLM_V2_TOKENIZER = LayoutLMv2TokenizerFast.from_pretrained(
     "microsoft/layoutlmv2-base-uncased"
 )
 ROBERTA_TOKENIZER = RobertaTokenizerFast.from_pretrained("roberta-base")
 
-'''def check_str_items(s1: str, s2: str) -> bool:
+"""def check_str_items(s1: str, s2: str) -> bool:
     if len(s1) != len(s2):
         return
     not_present = []
@@ -30,7 +32,8 @@ ROBERTA_TOKENIZER = RobertaTokenizerFast.from_pretrained("roberta-base")
         if s1[i] != s2[i]:
             return False
     
-    return True'''
+    return True"""
+
 
 def find_words_in_text(words: list[str], text: str) -> list[tuple[int, int]]:
     """_summary_
@@ -56,29 +59,22 @@ def find_words_in_text(words: list[str], text: str) -> list[tuple[int, int]]:
         offset = end_offset
     return offsets
 
+
 def _run_strip_accents(text: str) -> str:
-        """Strips accents from a piece of text."""
-        forms = ["NFC", "NFD", "NFKD", "NFKC"]
-        valid_forms = []
-        for form in forms:
-            if unicodedata.is_normalized(form, text):
-                valid_forms.append(form)
-        print(valid_forms)
-        if not valid_forms:
-            raise AssertionError
-        normalized_text = unicodedata.normalize("NFD", text)
-        assert len(normalized_text) == len(text)
-        output = []
-        for char in text:
-            cat = unicodedata.category(char)
-            if cat == "Mn":
-                raise AssertionError('category is "Mn"')
-                # if len(char) == 1:
-                #     output.append(' ')
-                continue
-            output.append(char)
-        assert len(output) == len(text)
-        return "".join(output)
+    """Strips accents from a piece of text."""
+    normalized_text = unicodedata.normalize("NFD", text)
+    # assert len(normalized_text) == len(text)
+    output = []
+    for char in normalized_text:
+        cat = unicodedata.category(char)
+        
+        if cat == "Mn":
+            print(char)
+            print("character is non printable")
+            continue
+        output.append(char)
+    assert len(output) == len(text)
+    return "".join(output)
 
 
 def text_from_layoutlmv2_token_ids(token_ids: list[int]) -> str:
@@ -112,17 +108,12 @@ def roberta_info_from_text(text: str) -> tuple[list[int], list[tuple[int, int]]]
 
 def layoutlmv2_tokens_from_ids(ids: list[int]) -> list[str]:
     # Deal with padding and "##" symbols in the output tokens
-    try:
 
-        layoutlmv2_tokens: list = LAYOUTLM_V2_TOKENIZER.convert_ids_to_tokens(
+    layoutlmv2_tokens: list = LAYOUTLM_V2_TOKENIZER.convert_ids_to_tokens(
             ids, skip_special_tokens=True
         )
-    except ValueError as e:
-        raise TokenConversionError(str(e))
-    
-    
+
     layoutlmv2_tokens = [t.replace("##", "") for t in layoutlmv2_tokens]
-    
     return layoutlmv2_tokens
 
 
@@ -174,7 +165,7 @@ def bbox_from_offset_alignment(
         if offset == (0, 0):
             # NOTE: this depends on what X-doc suggests
             results.append([0, 0, 0, 0])
-        
+
             continue
 
         for idx, layoutlmv2_offset in enumerate(
@@ -188,7 +179,7 @@ def bbox_from_offset_alignment(
                 break
         else:
             warnings.warn(f"failed to find a match for {offset}")
-            results.append([0,0,0,0])
+            results.append([0, 0, 0, 0])
     return results
 
 
@@ -209,14 +200,18 @@ def translate_bbox_info(
         list[list[int]]: roberta bbox info
     """
 
-    layoutlmv2_tokens: list[str] = layoutlmv2_tokens_from_ids(layoutlmv2_token_ids)
+    try:
+        layoutlmv2_tokens: list[str] = layoutlmv2_tokens_from_ids(layoutlmv2_token_ids)
+    except TokenConversionError:
+        layoutlmv2_tokens: list[str] = layoutlmv2_tokens_from_ids(layoutlmv2_token_ids[0])
+
     try:
         layoutlmv2_offsets: list[tuple[int, int]] = find_words_in_text(
             layoutlmv2_tokens, text
         )
-    except Exception():
-        raise AssertionError
-    try: 
+    except Exception as e:
+        raise e
+    try:
         roberta_bbox_info: list[list[int]] = bbox_from_offset_alignment(
             layoutlmv2_offsets, roberta_offsets, layoutlmv2_bbox_info
         )
@@ -241,32 +236,41 @@ def translate_to_roberta(
     """
     roberta_tokens_ids, roberta_offsets = roberta_info_from_text(text)
     roberta_bbox = translate_bbox_info(
-        text, layoutlmv2_tokens_ids, layoutlmv2_bbox_info, roberta_offsets
-    )
+            text, layoutlmv2_tokens_ids, layoutlmv2_bbox_info, roberta_offsets
+        )
     return roberta_tokens_ids, roberta_bbox
 
-def get_text_from_file(unique_id: str, page_num: int, split: str = 'test') -> str:
-    
-    file_name = f'docrep-tiny2/{split}/{unique_id}-{page_num}.txt'
-    file_path = os.path.join(os.path.dirname(__file__),file_name)
+
+def get_text_from_file(unique_id: str, page_num: int, split: str) -> str:
+
+    file_name = f"docrep-tiny2/{split}/{unique_id}-{page_num}.txt"
+    file_path = os.path.join(os.path.dirname(__file__), file_name)
     with open(file_path) as f:
         text = f.read()
     return text
 
+
 def get_file_meta_from_file_path(file_path: str) -> dict[str, str]:
-    splits = ['train', 'test', 'valid']
-    file_parts = file_path.split('/')
+    splits = ["train", "test", "valid"]
+    file_parts = file_path.split("/")
     data_split = None
     for split in splits:
         if split in file_parts:
             data_split = split
             break
-    unique_id, rest = os.path.basename(file_path).split('-')
-    page_num = rest.split('.')[0]
-    return {'unique_id': unique_id, 'page_num': page_num, 'data_split': data_split}
-    
+    unique_id, rest = os.path.basename(file_path).split("-")
+    page_num = rest.split(".")[0]
+    return {"unique_id": unique_id, "page_num": page_num, "data_split": data_split}
 
+def standardize_data(data):
+    for key in data.keys():
+        if len(data[key]) == 1:
+            flattened = torch.flatten(data[key])
+            data[key] = flattened
+    return data
 
+def ignore_file(data: dict[str, Any])-> bool:
+    return isinstance(data['input_ids'], list) 
 
 def convert_to_new_dataset(old_filepath: str, new_filepath: str, override=False):
     """
@@ -281,24 +285,19 @@ def convert_to_new_dataset(old_filepath: str, new_filepath: str, override=False)
     """
     if os.path.exists(new_filepath) and not override:
         return
-    
+
     data = torch.load(old_filepath)
     
-    meta = get_file_meta_from_file_path(old_filepath)
-    text = get_text_from_file(meta['unique_id'], meta['page_num'], meta['data_split'])
+    if ignore_file(data):
+        return
     
-    try:
+    meta = get_file_meta_from_file_path(old_filepath)
+    text = get_text_from_file(meta["unique_id"], meta["page_num"], meta["data_split"])
+    
 
-        roberta_tokens, roberta_bbox_info = translate_to_roberta(
-            data["input_ids"], data["bbox"], text = text
+    roberta_tokens, roberta_bbox_info = translate_to_roberta(
+        data['input_ids'][0], data['bbox'][0], text=text
         )
-    except TokenConversionError:
-        try:
-            roberta_tokens, roberta_bbox_info = translate_to_roberta(
-                data["input_ids"][0], data["bbox"][0], text = text
-            )
-        except:
-            pass
     torch.save(
         {
             "input_ids": roberta_tokens,
@@ -309,16 +308,24 @@ def convert_to_new_dataset(old_filepath: str, new_filepath: str, override=False)
     )
 
 
-def main(pattern, n_cores=1):
+def main(
+    pattern: str, dest_folder: str = "Roberta_files", n_cores: int = 1, split="test"
+):
     pool = ThreadPoolExecutor(n_cores)
     sample_files = glob.glob(pattern, recursive=True) * 12
     start = time.time()
     futures = {}
+    destination_folder = os.path.join(
+        os.path.dirname(__file__), f"{dest_folder}/{split}"
+    )
+    if not os.path.exists(destination_folder):
+        os.makedirs(destination_folder, exist_ok=True)
+
     for file in sample_files:
         future = pool.submit(
             convert_to_new_dataset,
             file,
-            f"/tmp/{os.path.basename(file)}",
+            f"{destination_folder}/{os.path.basename(file)}",
             override=True,
         )
         futures[future] = file
