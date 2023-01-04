@@ -163,6 +163,7 @@ class CustomTrainer(Trainer):
         model.train()
 
         inputs = self._prepare_inputs(inputs)
+        import ipdb; ipdb.set_trace()
 
         loss = self.compute_loss(model, inputs)
 

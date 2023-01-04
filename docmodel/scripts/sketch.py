@@ -14,6 +14,7 @@ class TokenConversionError(ValueError):
     pass
 
 
+
 LAYOUTLM_V2_TOKENIZER = LayoutLMv2TokenizerFast.from_pretrained(
     "microsoft/layoutlmv2-base-uncased"
 )

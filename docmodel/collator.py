@@ -1,15 +1,8 @@
-from pydantic import NoneStr
 from transformers import PreTrainedTokenizerBase
-from transformers.tokenization_utils_base import BatchEncoding
 from dataclasses import dataclass
 from typing import Optional, List, Tuple, Dict, Any, Union
 import random
 import warnings
-from transformers import RobertaTokenizerFast
-import numpy as np
-
-TOKENIZER = RobertaTokenizerFast.from_pretrained("roberta-base")
-
 import torch
 
 
@@ -172,7 +165,7 @@ class DataCollatorForWholeWordMask:
             if token == "[CLS]" or token == "[SEP]":
                 continue
 
-            if len(cand_indexes) >= 1 and token.startswith("##"):
+            if len(cand_indexes) >= 1 and not token.startswith("Ġ"):
                 cand_indexes[-1].append(i)
             else:
                 cand_indexes.append([i])
@@ -297,10 +290,11 @@ class DataCollatorForWholeWordMask:
         return inputs, labels
 
 
-def test_collator():
+def test_collator(tokenizer):
     # Handles masking out words for the MLM loss
     # Collate examples into a batch
-    collator = DataCollatorForWholeWordMask(tokenizer=TOKENIZER, pad_to_multiple_of=64)
+
+    collator = DataCollatorForWholeWordMask(tokenizer=tokenizer, pad_to_multiple_of=64)
     test_inputs = [
         {
             "input_ids": np.asarray([0, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 2, 1, 1, 1, 1]),
@@ -316,4 +310,8 @@ def test_collator():
 
 
 if __name__ == "__main__":
-    test_collator()
+    from transformers import RobertaTokenizerFast
+    import numpy as np
+
+    tokenizer = RobertaTokenizerFast.from_pretrained("roberta-base")
+    test_collator(tokenizer)

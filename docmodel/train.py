@@ -1,13 +1,13 @@
 from dataset import PageChunkDataset
-from transformers import TrainingArguments,LayoutLMv2Tokenizer
+from transformers import TrainingArguments
 from collator import DataCollatorForWholeWordMask
 import fire
 import torch
 from docmodel.doc_model import DocModelForMLM, DocModelConfig
-from docmodel.modeling_roberta import RobertaForMaskedLM
-from docmodel.configuration_roberta import RobertaConfig
-from docmodel.tokenization_roberta import RobertaTokenizer
+from transformers import RobertaForMaskedLM
+from transformers import RobertaTokenizerFast, RobertaConfig
 from trainer import CustomTrainer
+
 
 MODEL_CONFIG = {
     "doc_model": {
@@ -18,11 +18,14 @@ MODEL_CONFIG = {
         "eval_batch_size": 4,
         "max_length": 512,
         "gradient_accumulation_steps": 1,
-        "tokenizer": LayoutLMv2Tokenizer.from_pretrained,
+        "tokenizer": RobertaTokenizerFast.from_pretrained,
         "tokenizer_kwargs": {
-            "pretrained_model_name_or_path": "microsoft/layoutlmv2-base-uncased"
-        }
-        # 'pretrained_checkpoint': 'roberta-base'
+            "pretrained_model_name_or_path": "roberta-base"
+        },
+        "collator_kwargs": {
+            "include_2d_data": True
+        },
+        'pretrained_checkpoint': 'roberta-base'
     },
     "roberta": {
         "model": RobertaForMaskedLM,
@@ -35,7 +38,7 @@ MODEL_CONFIG = {
         "collator_kwargs": {
             "include_2d_data": False
         },
-        "tokenizer": RobertaTokenizer.from_pretrained,
+        "tokenizer": RobertaTokenizerFast.from_pretrained,
         "tokenizer_kwargs": {
             "pretrained_model_name_or_path": "roberta-base",
         } 
@@ -56,8 +59,7 @@ def main(
     gradient_checkpointing=True,
     pretrained_checkpoint=None,
     base_model="doc_model",
-    from_scratch=True,
-    reading_order="default",
+    from_scratch=False,
     num_train_epochs=1.0,
     learning_rate=1e-5,  # 2e-5
     weight_decay=0.01,  # 0.01
@@ -73,7 +75,9 @@ def main(
     model_config = MODEL_CONFIG[base_model]
     pretrained_checkpoint = pretrained_checkpoint or model_config.get('pretrained_checkpoint')
     model_cls = model_config['model']
+
     if from_scratch:
+        print("Training from random init")
         cfg = model_config["config"]
         model = model_cls(
             config=cfg(
@@ -81,6 +85,7 @@ def main(
             )
         )
     else:
+        print("Training from pre-trained model")
         model = model_cls.from_pretrained(pretrained_checkpoint)
 
     per_device_batch_size = batch_size or model_config['batch_size']
@@ -121,8 +126,8 @@ def main(
         directory=data_dir,
         split="train",
         max_length=(max_length or model_config['max_length']),
-        reading_order=reading_order,
     )
+    import ipdb; ipdb.set_trace()
     trainer_kwargs = dict(
         model=model,
         args=args,
@@ -134,7 +139,6 @@ def main(
         split="valid",
         max_length=(max_length or model_config["max_length"]),
         dataset_size=eval_examples,
-        reading_order=reading_order,
     )
     trainer_kwargs["eval_dataset"] = eval_dataset
     trainer = CustomTrainer(**trainer_kwargs)
