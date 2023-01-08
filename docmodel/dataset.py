@@ -96,7 +96,7 @@ class PageChunkDataset(Dataset):
 
         # Find first pad token and truncate here since we're re-padding
         first_pad_idx = (encoded_inputs['input_ids'] == 1).nonzero()
-        if first_pad_idx.size(0) > 0:
+        if first_pad_idx.size(0) > 0 and first_pad_idx[0] < end_index:
             end_index = first_pad_idx[0]
         
         # This probably drops our bbox info
@@ -118,7 +118,7 @@ class PageChunkDataset(Dataset):
             dim=0
         )
         sliced_input['bbox'] = bbox
-        assert bbox.shape[0] == sliced_input['input_ids'].shape[0]
+        assert bbox.shape[0] == sliced_input['input_ids'].shape[0], f"{bbox.shape} {sliced_input['input_ids'].shape}\n{sliced_input['input_ids']}"
         sliced_input["attention_mask"] = sliced_input["attention_mask"].type(
             torch.float32
         )

@@ -115,7 +115,7 @@ class CustomTrainer(Trainer):
             }
         )
 
-    def compute_loss(self, model, inputs, return_outputs=False):
+    def compute_loss(self, model, inputs):
         """
         How the loss is computed by Trainer. By default, all models return the loss in the first element.
 
@@ -125,7 +125,7 @@ class CustomTrainer(Trainer):
             labels = inputs.pop("labels")
         else:
             labels = None
-        outputs = model(**inputs, return_dict=return_outputs)
+        outputs = model(**inputs)
         # self.log_all_losses(outputs)
         # Save past state if it exists
         # TODO: this needs to be fixed and made cleaner later.
@@ -138,7 +138,7 @@ class CustomTrainer(Trainer):
             # We don't use .loss here since the model may return tuples instead of ModelOutput.
             loss = outputs["loss"] if isinstance(outputs, dict) else outputs[0]
 
-        return (loss, outputs) if return_outputs else loss
+        return loss
 
     def training_step(
         self, model: nn.Module, inputs: Dict[str, Union[torch.Tensor, Any]]
@@ -164,7 +164,6 @@ class CustomTrainer(Trainer):
 
         inputs = self._prepare_inputs(inputs)
 
-        import ipdb; ipdb.set_trace()
         loss = self.compute_loss(model, inputs)
 
         if self.args.n_gpu > 1:

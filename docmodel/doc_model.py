@@ -315,7 +315,8 @@ class DocModelForMLM(BertPreTrainedModel):
         position_ids=None,
         head_mask=None,
         inputs_embeds=None,
-        masked_lm_labels=None,
+        labels=None,
+        bbox_labels=None,
         encoder_hidden_states=None,
         encoder_attention_mask=None,
     ):
@@ -338,16 +339,11 @@ class DocModelForMLM(BertPreTrainedModel):
         outputs = (prediction_scores,) + outputs[
             2:
         ]  # Add hidden states and attention if they are here
-
-        # Although this may seem awkward, BertForMaskedLM supports two scenarios:
-        # 1. If a tensor that contains the indices of masked labels is provided,
-        #    the cross-entropy is the MLM cross-entropy that measures the likelihood
-        #    of predictions for masked words.
-        if masked_lm_labels is not None:
+        if labels is not None:
             loss_fct = CrossEntropyLoss()
             masked_lm_loss = loss_fct(
                 prediction_scores.view(-1, self.config.vocab_size),
-                masked_lm_labels.view(-1),
+                labels.view(-1),
             )
             outputs = (masked_lm_loss,) + outputs
         return (

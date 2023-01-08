@@ -14,7 +14,7 @@ MODEL_CONFIG = {
         "model": DocModelForMLM,
         "config": DocModelConfig,
         "dataset": PageChunkDataset,
-        "batch_size": 8,
+        "batch_size": 16,
         "eval_batch_size": 4,
         "max_length": 512,
         "gradient_accumulation_steps": 1,
@@ -31,7 +31,7 @@ MODEL_CONFIG = {
         "model": RobertaForMaskedLM,
         "config": RobertaConfig,
         "dataset": PageChunkDataset,
-        "batch_size": 8,
+        "batch_size": 16,
         "eval_batch_size": 4,
         "max_length": 512,
         "gradient_accumulation_steps": 1,
@@ -64,8 +64,9 @@ def main(
     learning_rate=1e-5,  # 2e-5
     weight_decay=0.01,  # 0.01
     warmup_ratio=0.1,  # 0.1
-    gradient_accumulation_steps=16,
+    gradient_accumulation_steps=1,
     resume=False,
+    max_steps=10000,
     **kwargs,
 ):
     if kwargs:
@@ -97,22 +98,23 @@ def main(
     )
     args = TrainingArguments(
         output_dir=experiment_name,
+        run_name=experiment_name,
         dataloader_num_workers=dataloader_num_workers,
         per_device_train_batch_size=per_device_batch_size,
-        per_device_eval_batch_size=(
-            eval_batch_size or model_config['eval_batch_size']
-        ),
-        evaluation_strategy="steps",
-        eval_steps=eval_steps,
+        do_eval=False,
+        evaluation_strategy="no",
         num_train_epochs=num_train_epochs,
         prediction_loss_only=False,
         gradient_accumulation_steps=gradient_accumulation_steps,
         ignore_data_skip=False,
         save_steps=1000,
         save_total_limit=2,
+        save_strategy="steps",
         learning_rate=learning_rate,
         warmup_ratio=warmup_ratio,
         weight_decay=weight_decay,
+        max_steps=max_steps,
+        report_to='wandb'
     )
     collator_kwargs = model_config.get('collator_kwargs', {})
     collator = DataCollatorForWholeWordMask(
