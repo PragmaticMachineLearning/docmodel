@@ -1,5 +1,3 @@
-
-
 import logging
 
 import torch
@@ -17,7 +15,7 @@ DOCMODEL_PRETRAINED_CONFIG_ARCHIVE_MAP = {}
 
 
 class DocModelConfig(RobertaConfig):
-    pretrained_config_archive_map = DOCMODEL_PRETRAINED_CONFIG_ARCHIVE_MAP 
+    pretrained_config_archive_map = DOCMODEL_PRETRAINED_CONFIG_ARCHIVE_MAP
     model_type = "bert"
 
     def __init__(self, max_2d_position_embeddings=1024, add_linear=False, **kwargs):
@@ -53,7 +51,9 @@ class DocModelEmbeddings(nn.Module):
             config.type_vocab_size, config.hidden_size
         )
 
-        self.LayerNorm = torch.nn.LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
+        self.LayerNorm = torch.nn.LayerNorm(
+            config.hidden_size, eps=config.layer_norm_eps
+        )
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
 
         self.doc_linear1 = nn.Linear(config.hidden_size, config.hidden_size)
@@ -89,21 +89,24 @@ class DocModelEmbeddings(nn.Module):
         right_position_embeddings = self.x_position_embeddings(bbox[:, :, 2])
         lower_position_embeddings = self.y_position_embeddings(bbox[:, :, 3])
         h_position_embeddings = self.h_position_embeddings(
-            bbox[:, :, 3] - bbox[:, :, 1]
+            torch.abs(bbox[:, :, 3] - bbox[:, :, 1])
         )
         w_position_embeddings = self.w_position_embeddings(
-            bbox[:, :, 2] - bbox[:, :, 0]
+            torch.abs(bbox[:, :, 2] - bbox[:, :, 0])
         )
 
-        
-        temp_embeddings = self.doc_linear2(self.relu(self.doc_linear1(
+        temp_embeddings = self.doc_linear2(
+            self.relu(
+                self.doc_linear1(
                     left_position_embeddings
                     + upper_position_embeddings
                     + right_position_embeddings
                     + lower_position_embeddings
                     + h_position_embeddings
                     + w_position_embeddings
-                )))
+                )
+            )
+        )
 
         embeddings = (
             words_embeddings
@@ -150,7 +153,7 @@ class DocModel(BertModel):
         # So we can broadcast to [batch_size, num_heads, from_seq_length, to_seq_length]
         # this attention mask is more simple than the triangular masking of causal attention
         # used in OpenAI GPT, we just need to prepare the broadcast dimension here.
-        extended_attention_mask = attention_mask.unsqueeze(1).unsqueeze(2) 
+        extended_attention_mask = attention_mask.unsqueeze(1).unsqueeze(2)
 
         # Since attention_mask is 1.0 for positions we want to attend and 0.0 for
         # masked positions, this operation will create a tensor which is 0.0 for
@@ -168,7 +171,7 @@ class DocModel(BertModel):
         # attention_probs has shape bsz x n_heads x N x N
         # input head_mask has shape [num_heads] or [num_hidden_layers x num_heads]
         # and head_mask is converted to shape [num_hidden_layers x batch x num_heads x seq_length x seq_length]
-        if head_mask is not None: 
+        if head_mask is not None:
             if head_mask.dim() == 1:
                 head_mask = (
                     head_mask.unsqueeze(0).unsqueeze(0).unsqueeze(-1).unsqueeze(-1)
@@ -259,11 +262,6 @@ class DocModelForTokenClassification(BertPreTrainedModel):
         return outputs  # (loss), scores, (hidden_states), (attentions)
 
 
-
-
-
-
-
 class MLMHead(nn.Module):
     def __init__(self, config):
         super().__init__()
@@ -286,6 +284,7 @@ class MLMHead(nn.Module):
         hidden_states = self.layer_norm(hidden_states)
         hidden_states = self.decoder(hidden_states)
         return hidden_states
+
 
 class DocModelForMLM(BertPreTrainedModel):
     config_class = DocModelConfig
@@ -346,8 +345,4 @@ class DocModelForMLM(BertPreTrainedModel):
                 labels.view(-1),
             )
             outputs = (masked_lm_loss,) + outputs
-        return (
-            outputs
-        )  # (masked_lm_loss), (ltr_lm_loss), prediction_scores, (hidden_states), (attentions)
-
-
+        return outputs  # (masked_lm_loss), (ltr_lm_loss), prediction_scores, (hidden_states), (attentions)

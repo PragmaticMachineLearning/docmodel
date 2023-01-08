@@ -147,7 +147,15 @@ class DataCollatorForWholeWordMask:
         if not self.include_2d_data:
             del result["bbox"]
             del result["bbox_labels"]
-            del result["image"]
+
+        # print(
+        #     "Input IDs",
+        #     torch.min(result["input_ids"]).item(),
+        #     torch.max(result["input_ids"]).item(),
+        # )
+        # print(
+        #     "BBox", torch.min(result["bbox"]).item(), torch.max(result["bbox"]).item()
+        # )
 
         return result
 
