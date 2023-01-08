@@ -5,7 +5,11 @@ from dataclasses import dataclass
 from typing import Optional, List, Tuple, Dict, Any, Union
 import random
 import warnings
-from transformers import BertTokenizer, BertTokenizerFast
+from transformers import RobertaTokenizerFast
+import numpy as np
+
+TOKENIZER = RobertaTokenizerFast.from_pretrained("roberta-base")
+
 import torch
 
 
@@ -40,6 +44,7 @@ def _torch_collate_batch(examples, tokenizer, pad_to_multiple_of: Optional[int] 
         max_length = ((max_length // pad_to_multiple_of) + 1) * pad_to_multiple_of
 
     if len(examples[0].shape) == 1:
+        # Maybe we need to change this to 0 for bounding box?
         result = examples[0].new_full(
             [len(examples), max_length], tokenizer.pad_token_id
         )
@@ -128,6 +133,7 @@ class DataCollatorForWholeWordMask:
             )
         else:
             bbox_inputs, bbox_labels = batch_bbox, batch_bbox
+
         result = {
             "input_ids": inputs,
             "labels": labels,
@@ -144,16 +150,16 @@ class DataCollatorForWholeWordMask:
                     if key != "image"
                     else None,
                 )
-        
+
         if not self.include_2d_data:
-            del result['bbox']
-            del result['bbox_labels']
-            del result['image']
-        
+            del result["bbox"]
+            del result["bbox_labels"]
+            del result["image"]
+
         return result
 
     def _whole_word_mask(
-        self, input_tokens: List[str], max_predictions: int = 512, proba: float = None
+        self, input_tokens: List[str], max_percentage: float = 0.2, proba: float = 0.15
     ):
         """
         Get 0/1 labels for masked tokens with whole word mask proxy
@@ -172,6 +178,7 @@ class DataCollatorForWholeWordMask:
                 cand_indexes.append([i])
 
         random.shuffle(cand_indexes)
+        max_predictions = int(len(input_tokens) * max_percentage)
         num_to_predict = min(
             max_predictions,
             max(1, int(round(len(input_tokens)))),
@@ -215,7 +222,6 @@ class DataCollatorForWholeWordMask:
         # We sample a few tokens in each sequence for masked-LM training (with probability args.mlm_probability defaults to 0.15 in Bert/RoBERTa)
 
         probability_matrix = mask_labels
-
         special_tokens_mask = [
             self.tokenizer.get_special_tokens_mask(val, already_has_special_tokens=True)
             for val in labels.tolist()
@@ -289,3 +295,25 @@ class DataCollatorForWholeWordMask:
 
         # The rest of the time (10% of the time) we keep the masked input tokens unchanged
         return inputs, labels
+
+
+def test_collator():
+    # Handles masking out words for the MLM loss
+    # Collate examples into a batch
+    collator = DataCollatorForWholeWordMask(tokenizer=TOKENIZER, pad_to_multiple_of=64)
+    test_inputs = [
+        {
+            "input_ids": np.asarray([0, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 2, 1, 1, 1, 1]),
+            "bbox": np.random.randint(low=0, high=1000, size=[16, 4]),
+        },
+        {
+            "input_ids": np.asarray([0, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 2]),
+            "bbox": np.random.randint(low=0, high=1000, size=[14, 4]),
+        },
+    ]
+    output = collator(test_inputs)
+    print(output)
+
+
+if __name__ == "__main__":
+    test_collator()
