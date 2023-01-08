@@ -1,4 +1,3 @@
-from bdb import set_trace
 import glob
 import io
 import os
@@ -52,8 +51,15 @@ class PageChunkDataset(Dataset):
         return len(self.filepaths)
 
     def convert_dtype(self, encoded_inputs):
+        # Accidentally overflowed int16
         encoded_inputs["input_ids"] = (
             encoded_inputs["input_ids"].type(torch.int32).squeeze(0)
+        )
+        correction = torch.iinfo(torch.int16).max * 2 + 2
+        encoded_inputs['input_ids'] = torch.where(
+            encoded_inputs['input_ids'] < 0, 
+            encoded_inputs['input_ids'] + correction, 
+            encoded_inputs['input_ids']
         )
         encoded_inputs["bbox"] = encoded_inputs["bbox"].type(torch.int32).squeeze(0)
         # Occasionally OCR system returns a value outside of page bounds
@@ -87,19 +93,32 @@ class PageChunkDataset(Dataset):
         )
         start_index = random.choice(candidate_start_indices)
         end_index = start_index + tokens_per_chunk
+
+        # Find first pad token and truncate here since we're re-padding
+        first_pad_idx = (encoded_inputs['input_ids'] == 1).nonzero()
+        if first_pad_idx.size(0) > 0:
+            end_index = first_pad_idx[0]
         
         # This probably drops our bbox info
         # Just needs to handle padding / truncation / attention mask?
         # Does not need to handle converting from words to tokens like the LayoutLMv2 version
         # since we have already dealt with that during download
         sliced_input = tokenizer.prepare_for_model(
-            encoded_inputs["input_ids"][start_index:end_index].tolist(),
-            boxes=encoded_inputs["bbox"][start_index:end_index].tolist(),
+            ids=encoded_inputs["input_ids"][start_index:end_index].tolist(),
+            # Should never really matter -- we have manually taken care of 
             max_length=self.max_length,
             return_tensors="pt",
             padding="longest",
             truncation=True,
         )
+        bbox = torch.tensor(encoded_inputs["bbox"][start_index:end_index])
+        # Add bbox info for start and end chars
+        bbox = torch.cat(
+            (torch.zeros(1, 4, dtype=torch.int32), bbox, torch.zeros(1, 4, dtype=torch.int32)), 
+            dim=0
+        )
+        sliced_input['bbox'] = bbox
+        assert bbox.shape[0] == sliced_input['input_ids'].shape[0]
         sliced_input["attention_mask"] = sliced_input["attention_mask"].type(
             torch.float32
         )

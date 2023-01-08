@@ -127,7 +127,6 @@ def main(
         split="train",
         max_length=(max_length or model_config['max_length']),
     )
-    import ipdb; ipdb.set_trace()
     trainer_kwargs = dict(
         model=model,
         args=args,

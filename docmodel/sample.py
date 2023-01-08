@@ -15,13 +15,13 @@ import functools
 import numpy as np
 from sklearn.model_selection import train_test_split
 import torch
-from docrep.etl_utils import normalize_bbox
+from docmodel.etl_utils import normalize_bbox
 import traceback
 from transformers import RobertaTokenizerFast
 import tqdm
 from typing import Union
 
-from docrep.dataset import preprocess
+from docmodel.dataset import preprocess
 
 import json
 
