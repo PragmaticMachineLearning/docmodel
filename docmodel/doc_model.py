@@ -6,6 +6,10 @@ from torch.nn import CrossEntropyLoss
 from transformers import BertModel, BertPreTrainedModel, RobertaConfig
 from transformers.models.bert.modeling_bert import BertOnlyMLMHead
 from transformers.activations import ACT2FN
+from typing import Optional
+from transformers.models.bert.modeling_bert import BertEmbeddings, BertEncoder, BertPooler, BertLayer, BertAttention, BertIntermediate, BertOutput, BertSelfAttention, BertSelfOutput
+from docmodel.attention import FlashAttention
+
 
 logger = logging.getLogger(__name__)
 
@@ -20,6 +24,7 @@ class DocModelConfig(RobertaConfig):
 
     def __init__(self, max_2d_position_embeddings=1024, add_linear=False, **kwargs):
         super().__init__(**kwargs)
+
 
 
 class DocModelEmbeddings(nn.Module):
@@ -119,8 +124,57 @@ class DocModelEmbeddings(nn.Module):
         embeddings = self.dropout(embeddings)
         return embeddings
 
+class CustomBertModel(BertModel):
 
-class DocModel(BertModel):
+    def __init__(self, config, add_pooling_layer=True):
+        super(BertModel, self).__init__(config)
+        self.config = config
+
+        self.embeddings = BertEmbeddings(config)
+        self.encoder = CustomBertEncoder(config)
+
+        self.pooler = BertPooler(config) if add_pooling_layer else None
+
+        # Initialize weights and apply final processing
+        self.post_init()
+
+
+class CustomBertEncoder(BertEncoder):
+      
+    def __init__(self, config):
+        super(BertEncoder, self).__init__()
+        self.config = config
+        self.layer = nn.ModuleList([CustomBertLayer(config) for _ in range(config.num_hidden_layers)])
+        self.gradient_checkpointing = False
+
+    
+class CustomBertLayer(BertLayer):
+    def __init__(self, config):
+        super(BertLayer, self).__init__()
+        self.chunk_size_feed_forward = config.chunk_size_feed_forward
+        self.seq_len_dim = 1
+        self.attention = BertAttention(config)
+        self.is_decoder = config.is_decoder
+        self.add_cross_attention = config.add_cross_attention
+        if self.add_cross_attention:
+            if not self.is_decoder:
+                raise ValueError(f"{self} should be used as a decoder model if cross attention is added")
+            self.crossattention = BertAttention(config, position_embedding_type="absolute")
+        self.intermediate = BertIntermediate(config)
+        self.output = BertOutput(config)
+
+
+class CustomBertAttention(BertAttention):
+    def __init__(self, config, position_embedding_type=None):
+        super(BertAttention, self).__init__()
+        self.self = FlashAttention(config, position_embedding_type=position_embedding_type)
+        self.output = BertSelfOutput(config)
+        self.pruned_heads = set()
+
+
+
+
+class DocModel(CustomBertModel):
 
     config_class = DocModelConfig
     pretrained_model_archive_map = DOCMODEL_PRETRAINED_MODEL_ARCHIVE_MAP
@@ -284,6 +338,7 @@ class MLMHead(nn.Module):
         hidden_states = self.layer_norm(hidden_states)
         hidden_states = self.decoder(hidden_states)
         return hidden_states
+
 
 
 class DocModelForMLM(BertPreTrainedModel):
