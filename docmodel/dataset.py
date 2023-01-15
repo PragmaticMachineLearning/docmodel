@@ -12,7 +12,7 @@ from torch.utils.data import Dataset
 # Stackoverflow magic number -- not sure if this is the absolute max or not
 PIL.Image.MAX_IMAGE_PIXELS = 933120000
 
-tokenizer = RobertaTokenizerFast.from_pretrained("roberta-base")
+tokenizer = RobertaTokenizerFast.from_pretrained("roberta-base", add_prefix_space=True)
 
 
 
