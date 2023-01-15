@@ -182,16 +182,16 @@ class DocModelDataset(Dataset):
         sliced_input["attention_mask"] = sliced_input["attention_mask"].type(
             torch.float32
         )
-        sliced_input['filename'] = filepath
+        # sliced_input['filename'] = filepath
         return sliced_input
 
-    def save(self):
+    def save(self): 
         pass
 
 
 if __name__ == "__main__":
     dataset = DocModelDataset(
-        directory="document-data",
+        directory="~/doc-model/docmodel/document-data",
     )
     for i in range(len(dataset)):
         dataset[i]
