@@ -15,6 +15,58 @@ PIL.Image.MAX_IMAGE_PIXELS = 933120000
 tokenizer = RobertaTokenizerFast.from_pretrained("roberta-base")
 
 
+
+def preprocess(page, max_length=512, chunk_overlap=True, shrink_dtype=True):
+    stride = max_length // 3 if (chunk_overlap and max_length) else 0
+    truncation = False if max_length is None else True
+    add_special_tokens = truncation
+
+    encoded_inputs = tokenizer(
+        page["tokens"],
+        padding="max_length",
+        max_length=max_length,
+        return_tensors="pt",
+        truncation=truncation,
+        add_special_tokens=add_special_tokens,
+        return_overflowing_tokens=True,
+        stride=stride,
+        # We use this argument because the texts in our dataset are lists of words (with a label for each word).
+        is_split_into_words=True,
+    )
+
+    bbox = page["boxes"]
+
+    bbox_inputs = []
+    previous_word_idx = None
+    for word_idx in encoded_inputs.word_ids():
+        # Special tokens don't have position info
+        if word_idx is None:
+            bbox_inputs.append([0, 0, 0, 0])
+        # We set the label for the first token of each word.
+        elif word_idx != previous_word_idx:
+            bbox_inputs.append(bbox[word_idx])
+        # For the other tokens in a word, we set the label to either the current label or -100, depending on
+        # the label_all_tokens flag.
+        else:
+            bbox_inputs.append(bbox[word_idx])
+        previous_word_idx = word_idx
+
+    encoded_inputs["bbox"] = torch.tensor(bbox_inputs)
+
+    if shrink_dtype:
+        encoded_inputs["input_ids"] = encoded_inputs["input_ids"].type(torch.int16)
+        encoded_inputs["attention_mask"] = encoded_inputs["attention_mask"].type(
+            torch.bool
+        )
+        encoded_inputs["bbox"] = encoded_inputs["bbox"].type(torch.int16)
+
+    if truncation:
+        assert encoded_inputs.input_ids.shape[-1:] == torch.Size([512])
+        assert encoded_inputs.attention_mask.shape[-1:] == torch.Size([512])
+        assert encoded_inputs.bbox.shape[-2:] == torch.Size([512, 4])
+
+    return encoded_inputs
+
 class DocModelDataset(Dataset):
     def __init__(
         self,
@@ -130,6 +182,7 @@ class DocModelDataset(Dataset):
         sliced_input["attention_mask"] = sliced_input["attention_mask"].type(
             torch.float32
         )
+        sliced_input['filename'] = filepath
         return sliced_input
 
     def save(self):
