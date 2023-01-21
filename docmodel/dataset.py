@@ -78,6 +78,7 @@ class DocModelDataset(Dataset):
         stride=None,
         reading_order="default",
         seed=42,
+        include_filename=False
     ):
         if isinstance(directory, str):
             self.filepaths = list(
@@ -99,6 +100,7 @@ class DocModelDataset(Dataset):
         self.reading_order = reading_order
         self.per_chunk_length = per_chunk_length
         self.seen_filepaths = []
+        self.include_filename = include_filename
 
     def __len__(self):
         return len(self.filepaths)
@@ -182,7 +184,8 @@ class DocModelDataset(Dataset):
         sliced_input["attention_mask"] = sliced_input["attention_mask"].type(
             torch.float32
         )
-        # sliced_input['filename'] = filepath
+        if self.include_filename:
+            sliced_input['filename'] = filepath
         return sliced_input
 
     def save(self): 

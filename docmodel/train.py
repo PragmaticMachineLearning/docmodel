@@ -13,7 +13,7 @@ MODEL_CONFIG = {
         "model": DocModelForMLM,
         "config": DocModelConfig,
         "dataset": DocModelDataset,
-        "batch_size": 16,
+        "batch_size": 24,
         "max_length": 512,
         "gradient_accumulation_steps": 8,
         "tokenizer": RobertaTokenizerFast.from_pretrained,
@@ -101,11 +101,13 @@ def main(
         save_steps=1000,
         save_total_limit=2,
         save_strategy="steps",
+        logging_steps=100,
         learning_rate=learning_rate,
         warmup_ratio=warmup_ratio,
         weight_decay=weight_decay,
         max_steps=max_steps,
         report_to="wandb",
+        fp16=True,
     )
     collator_kwargs = model_config.get("collator_kwargs", {})
     collator = DataCollatorForWholeWordMask(
