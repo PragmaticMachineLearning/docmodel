@@ -13,8 +13,9 @@ MODEL_CONFIG = {
         "model": DocModelForMLM,
         "config": DocModelConfig,
         "dataset": DocModelDataset,
-        "batch_size": 24,
+        "batch_size": 32,
         "max_length": 512,
+        "dropout": None,
         "gradient_accumulation_steps": 8,
         "tokenizer": RobertaTokenizerFast.from_pretrained,
         "tokenizer_kwargs": {"pretrained_model_name_or_path": "roberta-base"},
@@ -55,7 +56,7 @@ def main(
     gradient_accumulation_steps=8,
     resume=False,
     max_steps=10000,
-    **kwargs,
+    **kwargs
 ):
     if kwargs:
         raise AssertionError(f"Unexpected arguments: {kwargs}")
@@ -78,7 +79,9 @@ def main(
     else:
         print("Training from pre-trained model")
         model = model_cls.from_pretrained(pretrained_checkpoint)
-
+    
+    model.config.attention_probs_dropout_prob = model_config["dropout"]
+    model.config.hidden_dropout_prob = model_config['dropout']
     per_device_batch_size = batch_size or model_config["batch_size"]
     gradient_accumulation_steps = (
         gradient_accumulation_steps or model_config["gradient_accumulation_steps"]

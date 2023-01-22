@@ -8,7 +8,7 @@ from transformers.models.bert.modeling_bert import BertOnlyMLMHead
 from transformers.activations import ACT2FN
 from typing import Optional
 from transformers.models.bert.modeling_bert import BertEmbeddings, BertEncoder, BertPooler, BertLayer, BertAttention, BertIntermediate, BertOutput, BertSelfAttention, BertSelfOutput
-from docmodel.attention import FlashAttention
+from docmodel.attention import FlashSelfAttention
 
 
 logger = logging.getLogger(__name__)
@@ -153,7 +153,7 @@ class CustomBertLayer(BertLayer):
         super(BertLayer, self).__init__()
         self.chunk_size_feed_forward = config.chunk_size_feed_forward
         self.seq_len_dim = 1
-        self.attention = BertAttention(config)
+        self.attention = CustomBertAttention(config)
         self.is_decoder = config.is_decoder
         self.add_cross_attention = config.add_cross_attention
         if self.add_cross_attention:
@@ -167,7 +167,7 @@ class CustomBertLayer(BertLayer):
 class CustomBertAttention(BertAttention):
     def __init__(self, config, position_embedding_type=None):
         super(BertAttention, self).__init__()
-        self.self = FlashAttention(config, position_embedding_type=position_embedding_type)
+        self.self = FlashSelfAttention(config, position_embedding_type=position_embedding_type)
         self.output = BertSelfOutput(config)
         self.pruned_heads = set()
 
