@@ -35,9 +35,13 @@ class DocModelEmbeddings(nn.Module):
 
         self.word_embeddings = nn.Embedding(
             config.vocab_size, config.hidden_size, padding_idx=0
-        )
+        )  
         self.position_embeddings = nn.Embedding(
             config.max_position_embeddings, config.hidden_size
+        )
+        self.expanded_position_embeddings = nn.Embedding(
+            config.max_position_embeddings * 4, 
+            config.hidden_size, 
         )
         config.max_2d_position_embeddings = 1024
         self.x_position_embeddings = nn.Embedding(
@@ -75,8 +79,11 @@ class DocModelEmbeddings(nn.Module):
         token_type_ids=None,
         position_ids=None,
         inputs_embeds=None,
-    ):
+    ):  
         seq_length = input_ids.size(1)
+        pad_tokens = torch.where(input_ids == 1, 1, 0)
+        percent_pad = pad_tokens.sum() / (input_ids.size(0) * input_ids.size(1))
+        print(percent_pad)
         if position_ids is None:
             position_ids = torch.arange(
                 seq_length, dtype=torch.long, device=input_ids.device
@@ -86,7 +93,7 @@ class DocModelEmbeddings(nn.Module):
             token_type_ids = torch.zeros_like(input_ids)
 
         words_embeddings = self.word_embeddings(input_ids)
-        position_embeddings = self.position_embeddings(position_ids)
+        position_embeddings = self.expanded_position_embeddings(position_ids)
         token_type_embeddings = self.token_type_embeddings(token_type_ids)
 
         left_position_embeddings = self.x_position_embeddings(bbox[:, :, 0])
@@ -112,6 +119,12 @@ class DocModelEmbeddings(nn.Module):
                 )
             )
         )
+
+        # # All of the new embeddings related to 2d position
+        # new_norm = torch.mean(torch.norm(temp_embeddings, dim=2))
+        # # Everything that was in roberta already
+        # old_norm = torch.mean(torch.norm(words_embeddings + position_embeddings, dim=2))
+        # print(f"Old: {old_norm}, New: {new_norm}, Percentage: {new_norm/old_norm}")
 
         embeddings = (
             words_embeddings
@@ -353,6 +366,21 @@ class DocModelForMLM(BertPreTrainedModel):
         self.lm_head = MLMHead(config)
 
         self.init_weights()
+
+    def resize_position_embeddings(self, new_num_position_embeddings: int):
+        pos_embed = self.roberta.embeddings.position_embeddings.weight
+        self.roberta.embeddings.expanded_position_embeddings.weight = torch.nn.Parameter(
+            data=torch.cat(
+                (
+                    pos_embed,
+                    pos_embed,
+                    pos_embed,
+                    pos_embed
+                ), 
+                dim=0
+            ),
+            requires_grad=True
+        )
 
     def get_input_embeddings(self):
         return self.roberta.embeddings.word_embeddings

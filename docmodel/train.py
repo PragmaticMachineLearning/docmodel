@@ -13,13 +13,15 @@ MODEL_CONFIG = {
         "model": DocModelForMLM,
         "config": DocModelConfig,
         "dataset": DocModelDataset,
-        "batch_size": 32,
-        "max_length": 512,
+        "batch_size": 8,
+        "max_length": 2048,
         "dropout": None,
         "gradient_accumulation_steps": 8,
         "tokenizer": RobertaTokenizerFast.from_pretrained,
+        # "tokenizer_kwargs": {"pretrained_model_name_or_path": "microsoft/xdoc-base"},
         "tokenizer_kwargs": {"pretrained_model_name_or_path": "roberta-base"},
-        "collator_kwargs": {"include_2d_data": True},
+        "collator_kwargs": {"include_2d_data": True, "pad_to_multiple_of": 128},
+        # "pretrained_checkpoint": "microsoft/xdoc-base",
         "pretrained_checkpoint": "roberta-base",
     },
     "roberta": {
@@ -50,9 +52,9 @@ def main(
     base_model="doc_model",
     from_scratch=False,
     num_train_epochs=1.0,
-    learning_rate=1e-5,  # 2e-5
-    weight_decay=0.01,  # 0.01
-    warmup_ratio=0.1,  # 0.1
+    learning_rate=3e-4,  
+    weight_decay=0.01,  
+    warmup_ratio=0.1,
     gradient_accumulation_steps=8,
     resume=False,
     max_steps=10000,
@@ -74,14 +76,18 @@ def main(
         model = model_cls(
             config=cfg(
                 gradient_checkpointing=gradient_checkpointing,
+                attention_probs_dropout_prob=model_config['dropout'],
+                hidden_dropout_prob=model_config['dropout'],
+                max_position_embeddings=model_config['max_length']
             )
         )
     else:
         print("Training from pre-trained model")
         model = model_cls.from_pretrained(pretrained_checkpoint)
     
-    model.config.attention_probs_dropout_prob = model_config["dropout"]
-    model.config.hidden_dropout_prob = model_config['dropout']
+    max_length = max_length or model_config['max_length']
+    if max_length:
+        model.resize_position_embeddings(max_length)
     per_device_batch_size = batch_size or model_config["batch_size"]
     gradient_accumulation_steps = (
         gradient_accumulation_steps or model_config["gradient_accumulation_steps"]
@@ -105,6 +111,7 @@ def main(
         save_total_limit=2,
         save_strategy="steps",
         logging_steps=100,
+        logging_first_step=True,
         learning_rate=learning_rate,
         warmup_ratio=warmup_ratio,
         weight_decay=weight_decay,
