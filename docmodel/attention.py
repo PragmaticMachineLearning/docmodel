@@ -20,8 +20,8 @@ class FlashSelfAttention(nn.Module):
         self.inner_attn = FlashAttention(attention_dropout=self.config.attention_probs_dropout_prob)
         
     @torch.jit.ignore  # This jit.ignore call is ignored?
-    def flash_inner(self, qkv):
-        return self.inner_attn(qkv, key_padding_mask=None, need_weights=False, causal=False)
+    def flash_inner(self, qkv, pad_mask):
+        return self.inner_attn(qkv, key_padding_mask=pad_mask, need_weights=False, causal=False)
        
     def forward(
         self,
@@ -39,7 +39,7 @@ class FlashSelfAttention(nn.Module):
 
         qkv = torch.stack((q, k, v), dim=2)
         qkv = rearrange(qkv, "b s three (h d) -> b s three h d", h=self.config.num_attention_heads)
-        context, attn_weights = self.flash_inner(qkv)
+        context, attn_weights = self.flash_inner(qkv, pad_mask=attention_mask)
         context_layer = rearrange(context, "b s h d -> b s (h d)")
         return (context_layer, )
 

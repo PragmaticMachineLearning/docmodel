@@ -3,26 +3,39 @@ from transformers import TrainingArguments
 from collator import DataCollatorForWholeWordMask
 import fire
 import torch
-from docmodel.doc_model import DocModelForMLM, DocModelConfig
+from docmodel.doc_model import RobertaDocModelForMLM, XDocModelForMLM, DocModelConfig
 from transformers import RobertaForMaskedLM
 from transformers import RobertaTokenizerFast, RobertaConfig
-from transformers import Trainer
+from transformers import Trainer, AutoConfig
+
+
+MAX_BATCH_SIZE_BY_SEQ_LENGTH = {
+    2048: 8,
+    512: 36
+}
 
 MODEL_CONFIG = {
-    "doc_model": {
-        "model": DocModelForMLM,
+    "doc-model-roberta": {
+        "model": RobertaDocModelForMLM,
         "config": DocModelConfig,
         "dataset": DocModelDataset,
-        "batch_size": 8,
         "max_length": 2048,
-        "dropout": None,
         "gradient_accumulation_steps": 8,
         "tokenizer": RobertaTokenizerFast.from_pretrained,
-        # "tokenizer_kwargs": {"pretrained_model_name_or_path": "microsoft/xdoc-base"},
         "tokenizer_kwargs": {"pretrained_model_name_or_path": "roberta-base"},
         "collator_kwargs": {"include_2d_data": True, "pad_to_multiple_of": 128},
-        # "pretrained_checkpoint": "microsoft/xdoc-base",
         "pretrained_checkpoint": "roberta-base",
+    },
+    "doc-model-xdoc": {
+        "model": XDocModelForMLM,
+        "config": DocModelConfig,
+        "dataset": DocModelDataset,
+        "max_length": 2048,
+        "gradient_accumulation_steps": 8,
+        "tokenizer": RobertaTokenizerFast.from_pretrained,
+        "tokenizer_kwargs": {"pretrained_model_name_or_path": "microsoft/xdoc-base"},
+        "collator_kwargs": {"include_2d_data": True, "pad_to_multiple_of": 128},
+        "pretrained_checkpoint": "microsoft/xdoc-base",
     },
     "roberta": {
         "model": RobertaForMaskedLM,
@@ -47,9 +60,11 @@ def main(
     mlm_proba=0.15,
     max_length=None,
     batch_size=None,
+    dropout=0.,
+    reading_order='default',
     gradient_checkpointing=True,
     pretrained_checkpoint=None,
-    base_model="doc_model",
+    base_model="doc-model-roberta",
     from_scratch=False,
     num_train_epochs=1.0,
     learning_rate=3e-4,  
@@ -83,11 +98,18 @@ def main(
         )
     else:
         print("Training from pre-trained model")
-        model = model_cls.from_pretrained(pretrained_checkpoint)
+        config = AutoConfig.from_pretrained(pretrained_checkpoint)
+        config.hidden_dropout_prob = dropout
+        config.attention_probs_dropout_prob = dropout
+        model = model_cls.from_pretrained(pretrained_checkpoint, config=config)
     
     max_length = max_length or model_config['max_length']
     if max_length:
         model.resize_position_embeddings(max_length)
+
+    if batch_size is None:
+        batch_size = MAX_BATCH_SIZE_BY_SEQ_LENGTH[max_length]
+
     per_device_batch_size = batch_size or model_config["batch_size"]
     gradient_accumulation_steps = (
         gradient_accumulation_steps or model_config["gradient_accumulation_steps"]
@@ -110,7 +132,7 @@ def main(
         save_steps=1000,
         save_total_limit=2,
         save_strategy="steps",
-        logging_steps=100,
+        logging_steps=1,
         logging_first_step=True,
         learning_rate=learning_rate,
         warmup_ratio=warmup_ratio,
@@ -129,6 +151,7 @@ def main(
         directory=data_dir,
         split="train",
         max_length=(max_length or model_config["max_length"]),
+        reading_order=reading_order
     )
     trainer_kwargs = dict(
         model=model,

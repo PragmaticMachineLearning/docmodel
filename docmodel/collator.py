@@ -76,7 +76,7 @@ class DataCollatorForWholeWordMask:
     tokenizer: PreTrainedTokenizerBase
     mlm: bool = True
     mlm_probability: float = 0.15
-    position_mask_probability: float = 0.15
+    position_mask_probability: float = 0.
     pad_to_multiple_of: Optional[int] = None
     tf_experimental_compile: bool = False
     include_2d_data: Optional[bool] = True
@@ -118,9 +118,11 @@ class DataCollatorForWholeWordMask:
         batch_position_mask = _torch_collate_batch(
             mask_labels, self.tokenizer, pad_to_multiple_of=self.pad_to_multiple_of
         )
-        inputs, labels = self.torch_mask_tokens(batch_input, batch_mask)
+        inputs, labels, attention_mask = self.torch_mask_tokens(batch_input, batch_mask)
 
         if self.position_mask_probability > 0.0:
+            print(f"POSITION MASK PROBA: {self.position_mask_probability}")
+            print("WARNING: PLEASE CHECK THIS CODE BEFORE USING IT -- IT PROBABLY NEEDS A SEPARATE MASK")
             bbox_inputs, bbox_labels = self.torch_mask_positions(
                 inputs=batch_bbox, tokens=batch_input, mask_labels=batch_position_mask
             )
@@ -132,17 +134,8 @@ class DataCollatorForWholeWordMask:
             "labels": labels,
             "bbox": bbox_inputs,
             "bbox_labels": bbox_labels,
+            "attention_mask": attention_mask
         }
-
-        for key in examples[0].keys():
-            if key not in ("input_ids", "bbox"):
-                result[key] = _torch_collate_batch(
-                    [e[key] for e in examples],
-                    self.tokenizer,
-                    pad_to_multiple_of=self.pad_to_multiple_of
-                    if key != "image"
-                    else None,
-                )
 
         if not self.include_2d_data:
             del result["bbox"]
@@ -210,7 +203,7 @@ class DataCollatorForWholeWordMask:
         ]
         return mask_labels
 
-    def torch_mask_tokens(self, inputs: Any, mask_labels: Any) -> Tuple[Any, Any]:
+    def torch_mask_tokens(self, inputs: Any, mask_labels: Any) -> Tuple[Any, Any, Any]:
         """
         Prepare masked tokens inputs/labels for masked language modeling: 80% MASK, 10% random, 10% original. Set
         'mask_labels' means we use whole word mask (wwm), we directly mask idxs according to it's ref.
@@ -230,13 +223,16 @@ class DataCollatorForWholeWordMask:
         probability_matrix.masked_fill_(
             torch.tensor(special_tokens_mask, dtype=torch.bool), value=0.0
         )
-        if self.tokenizer._pad_token is not None:
-            padding_mask = labels.eq(self.tokenizer.pad_token_id)
-            probability_matrix.masked_fill_(padding_mask, value=0.0)
+        padding_mask = labels.eq(self.tokenizer.pad_token_id)
+        probability_matrix.masked_fill_(padding_mask, value=0.0)
 
         masked_indices = probability_matrix.bool()
-        labels[~masked_indices] = -100  # We only compute loss on masked tokens
+        
+        # Attention mask is 0 only where padding is present
+        attention_mask = torch.ones_like(masked_indices, dtype=torch.float32).float()
+        attention_mask.masked_fill_(padding_mask, value=0.0)
 
+        labels[~masked_indices] = -100  # We only compute loss on masked tokens
         # 80% of the time, we replace masked input tokens with tokenizer.mask_token ([MASK])
         indices_replaced = (
             torch.bernoulli(torch.full(labels.shape, 0.8)).bool() & masked_indices
@@ -257,7 +253,7 @@ class DataCollatorForWholeWordMask:
         inputs[indices_random] = random_words[indices_random]
 
         # The rest of the time (10% of the time) we keep the masked input tokens unchanged
-        return inputs, labels
+        return inputs, labels, attention_mask
 
     def torch_mask_positions(
         self,

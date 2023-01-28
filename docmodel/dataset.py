@@ -5,6 +5,7 @@ import os
 import random
 
 import torch
+import numpy as np
 import PIL
 from transformers import RobertaTokenizerFast
 from torch.utils.data import Dataset
@@ -66,6 +67,18 @@ def preprocess(page, max_length=512, chunk_overlap=True, shrink_dtype=True):
         assert encoded_inputs.bbox.shape[-2:] == torch.Size([512, 4])
 
     return encoded_inputs
+
+
+def use_reading_order(words, bboxes, labels=None, order="default"):
+    if order == "default":
+        return (words, bboxes)
+    elif order == "single_column":
+        # Use y coordinate as primary, x coordinate as secondary
+        # We first discretize to prevent small variations in the y coordinate
+        # from changing the line a token is assigned to.
+        priority = (bboxes[:, 1] // 10) * 1000 + bboxes[:, 0]
+        resorted_idxs = torch.argsort(priority)
+        return (words[resorted_idxs], bboxes[resorted_idxs])
 
 class DocModelDataset(Dataset):
     def __init__(
@@ -129,15 +142,19 @@ class DocModelDataset(Dataset):
         self.seen_filepaths.append(filepath)
         encoded_inputs = torch.load(filepath)
         encoded_inputs = self.convert_dtype(encoded_inputs)
-        input_mask = encoded_inputs["input_ids"] != 0
 
-        # Empty pages represented as empty pad token
-        # TODO: fix upstream or find alternate solution
-        input_mask[0] = True
+        # Find first pad token and truncate here since we're re-padding
+        first_pad_idx = (encoded_inputs["input_ids"] == 1).nonzero()
+        if first_pad_idx.size(0) > 0:
+            end_index = first_pad_idx[0]
+            encoded_inputs['bbox'] = encoded_inputs['bbox'][:end_index]
+            encoded_inputs['input_ids'] = encoded_inputs['input_ids'][:end_index]
 
-        # Should ideally fix upstream
-        encoded_inputs["input_ids"] = encoded_inputs["input_ids"][input_mask]
-        encoded_inputs["bbox"] = encoded_inputs["bbox"][input_mask]
+        encoded_inputs['input_ids'], encoded_inputs['bbox'] = use_reading_order(
+            words=encoded_inputs['input_ids'], 
+            bboxes=encoded_inputs['bbox'], 
+            order=self.reading_order
+        )
 
         tokens_per_chunk = self.max_length - self.num_special_tokens
         candidate_start_indices = [0] + list(
@@ -149,11 +166,6 @@ class DocModelDataset(Dataset):
         )
         start_index = random.choice(candidate_start_indices)
         end_index = start_index + tokens_per_chunk
-
-        # Find first pad token and truncate here since we're re-padding
-        first_pad_idx = (encoded_inputs["input_ids"] == 1).nonzero()
-        if first_pad_idx.size(0) > 0 and first_pad_idx[0] < end_index:
-            end_index = first_pad_idx[0]
 
         # This probably drops our bbox info
         # Just needs to handle padding / truncation / attention mask?
