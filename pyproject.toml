@@ -1,0 +1,16 @@
+[tool.poetry]
+name = "doc-model"
+version = "0.1.0"
+description = "Unified pre-training for document understanding"
+authors = ["Madison May <madisonmay@indico.io>", "tobiadefami <tobiadefami@gmail.com>"]
+license = "MIT"
+readme = "README.md"
+packages = [{include = "doc_model"}]
+
+[tool.poetry.dependencies]
+python = "^3.10"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
