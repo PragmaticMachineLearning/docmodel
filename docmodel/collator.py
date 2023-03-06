@@ -6,6 +6,19 @@ import warnings
 import torch
 
 
+def visualize_inputs(tokenizer, result):
+    for i in range(len(result["input_ids"])):
+        input_text = tokenizer.decode(result["input_ids"][i])
+        print(f"\nMasked Input\n{input_text}")
+        label_mask = result["labels"][i] != -100
+        result["input_ids"][i][label_mask] = result["labels"][i][label_mask]
+        expected = tokenizer.decode(result["input_ids"][i])
+        print(
+            f"\nUnmasked Target\n{expected}",
+        )
+        print("\n--------------")
+
+
 def _torch_collate_batch(examples, tokenizer, pad_to_multiple_of: Optional[int] = None):
     """Collate `examples` into a batch, using the information in `tokenizer` for padding if necessary."""
     import numpy as np
@@ -76,7 +89,7 @@ class DataCollatorForWholeWordMask:
     tokenizer: PreTrainedTokenizerBase
     mlm: bool = True
     mlm_probability: float = 0.15
-    position_mask_probability: float = 0.
+    position_mask_probability: float = 0.0
     pad_to_multiple_of: Optional[int] = None
     tf_experimental_compile: bool = False
     include_2d_data: Optional[bool] = True
@@ -122,7 +135,9 @@ class DataCollatorForWholeWordMask:
 
         if self.position_mask_probability > 0.0:
             print(f"POSITION MASK PROBA: {self.position_mask_probability}")
-            print("WARNING: PLEASE CHECK THIS CODE BEFORE USING IT -- IT PROBABLY NEEDS A SEPARATE MASK")
+            print(
+                "WARNING: PLEASE CHECK THIS CODE BEFORE USING IT -- IT PROBABLY NEEDS A SEPARATE MASK"
+            )
             bbox_inputs, bbox_labels = self.torch_mask_positions(
                 inputs=batch_bbox, tokens=batch_input, mask_labels=batch_position_mask
             )
@@ -134,7 +149,7 @@ class DataCollatorForWholeWordMask:
             "labels": labels,
             "bbox": bbox_inputs,
             "bbox_labels": bbox_labels,
-            "attention_mask": attention_mask
+            "attention_mask": attention_mask,
         }
 
         if not self.include_2d_data:
@@ -149,6 +164,8 @@ class DataCollatorForWholeWordMask:
         # print(
         #     "BBox", torch.min(result["bbox"]).item(), torch.max(result["bbox"]).item()
         # )
+
+        # visualize_inputs(self.tokenizer, result)
 
         return result
 
@@ -227,7 +244,7 @@ class DataCollatorForWholeWordMask:
         probability_matrix.masked_fill_(padding_mask, value=0.0)
 
         masked_indices = probability_matrix.bool()
-        
+
         # Attention mask is 0 only where padding is present
         attention_mask = torch.ones_like(masked_indices, dtype=torch.float32).float()
         attention_mask.masked_fill_(padding_mask, value=0.0)

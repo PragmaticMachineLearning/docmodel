@@ -16,7 +16,6 @@ PIL.Image.MAX_IMAGE_PIXELS = 933120000
 tokenizer = RobertaTokenizerFast.from_pretrained("roberta-base", add_prefix_space=True)
 
 
-
 def preprocess(page, max_length=512, chunk_overlap=True, shrink_dtype=True):
     stride = max_length // 3 if (chunk_overlap and max_length) else 0
     truncation = False if max_length is None else True
@@ -38,19 +37,23 @@ def preprocess(page, max_length=512, chunk_overlap=True, shrink_dtype=True):
     bbox = page["boxes"]
 
     bbox_inputs = []
-    previous_word_idx = None
     for word_idx in encoded_inputs.word_ids():
         # Special tokens don't have position info
         if word_idx is None:
             bbox_inputs.append([0, 0, 0, 0])
         # We set the label for the first token of each word.
-        elif word_idx != previous_word_idx:
-            bbox_inputs.append(bbox[word_idx])
-        # For the other tokens in a word, we set the label to either the current label or -100, depending on
-        # the label_all_tokens flag.
         else:
             bbox_inputs.append(bbox[word_idx])
-        previous_word_idx = word_idx
+
+    if "labels" in page:
+        # For token classification task
+        labels = []
+        for word_idx in encoded_inputs.word_ids():
+            if word_idx is None:
+                labels.append(-100)
+            else:
+                labels.append(page["labels"][word_idx])
+        encoded_inputs["labels"] = torch.tensor(labels)
 
     encoded_inputs["bbox"] = torch.tensor(bbox_inputs)
 
@@ -62,9 +65,9 @@ def preprocess(page, max_length=512, chunk_overlap=True, shrink_dtype=True):
         encoded_inputs["bbox"] = encoded_inputs["bbox"].type(torch.int16)
 
     if truncation:
-        assert encoded_inputs.input_ids.shape[-1:] == torch.Size([512])
-        assert encoded_inputs.attention_mask.shape[-1:] == torch.Size([512])
-        assert encoded_inputs.bbox.shape[-2:] == torch.Size([512, 4])
+        assert encoded_inputs.input_ids.shape[-1:] == torch.Size([max_length])
+        assert encoded_inputs.attention_mask.shape[-1:] == torch.Size([max_length])
+        assert encoded_inputs.bbox.shape[-2:] == torch.Size([max_length, 4])
 
     return encoded_inputs
 
@@ -80,6 +83,7 @@ def use_reading_order(words, bboxes, labels=None, order="default"):
         resorted_idxs = torch.argsort(priority)
         return (words[resorted_idxs], bboxes[resorted_idxs])
 
+
 class DocModelDataset(Dataset):
     def __init__(
         self,
@@ -91,7 +95,7 @@ class DocModelDataset(Dataset):
         stride=None,
         reading_order="default",
         seed=42,
-        include_filename=False
+        include_filename=False,
     ):
         if isinstance(directory, str):
             self.filepaths = list(
@@ -108,7 +112,6 @@ class DocModelDataset(Dataset):
         if dataset_size is not None:
             self.filepaths = self.filepaths[:dataset_size]
         self.max_length = max_length
-        self.stride = stride or self.max_length // 3
         self.num_special_tokens = tokenizer.num_special_tokens_to_add()
         self.reading_order = reading_order
         self.per_chunk_length = per_chunk_length
@@ -137,31 +140,42 @@ class DocModelDataset(Dataset):
         )
         return encoded_inputs
 
+    def length(self, index):
+        return os.stat(self.filepaths[index]).st_size
+
     def __getitem__(self, index):
         filepath = self.filepaths[index]
         self.seen_filepaths.append(filepath)
-        encoded_inputs = torch.load(filepath)
+        try:
+            encoded_inputs = torch.load(filepath)
+        except:
+            import traceback
+
+            traceback.print_exc()
+            print("FAILED TO LOAD FILEPATH", filepath)
         encoded_inputs = self.convert_dtype(encoded_inputs)
 
         # Find first pad token and truncate here since we're re-padding
         first_pad_idx = (encoded_inputs["input_ids"] == 1).nonzero()
         if first_pad_idx.size(0) > 0:
             end_index = first_pad_idx[0]
-            encoded_inputs['bbox'] = encoded_inputs['bbox'][:end_index]
-            encoded_inputs['input_ids'] = encoded_inputs['input_ids'][:end_index]
+            encoded_inputs["bbox"] = encoded_inputs["bbox"][:end_index]
+            encoded_inputs["input_ids"] = encoded_inputs["input_ids"][:end_index]
 
-        encoded_inputs['input_ids'], encoded_inputs['bbox'] = use_reading_order(
-            words=encoded_inputs['input_ids'], 
-            bboxes=encoded_inputs['bbox'], 
-            order=self.reading_order
-        )
+        # encoded_inputs['input_ids'], encoded_inputs['bbox'] = use_reading_order(
+        #     words=encoded_inputs['input_ids'],
+        #     bboxes=encoded_inputs['bbox'],
+        #     order=self.reading_order
+        # )
 
-        tokens_per_chunk = self.max_length - self.num_special_tokens
+        max_length = self.max_length if random.random() > 0.01 else 512
+        stride = max_length // 3
+        tokens_per_chunk = max_length - self.num_special_tokens
         candidate_start_indices = [0] + list(
             range(
                 0,
                 len(encoded_inputs["input_ids"]) - tokens_per_chunk,
-                self.stride,
+                stride,
             )
         )
         start_index = random.choice(candidate_start_indices)
@@ -197,10 +211,10 @@ class DocModelDataset(Dataset):
             torch.float32
         )
         if self.include_filename:
-            sliced_input['filename'] = filepath
+            sliced_input["filename"] = filepath
         return sliced_input
 
-    def save(self): 
+    def save(self):
         pass
 
 

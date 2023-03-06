@@ -8,7 +8,17 @@ from transformers import BertModel, BertPreTrainedModel, RobertaConfig
 from transformers.models.bert.modeling_bert import BertOnlyMLMHead
 from transformers.activations import ACT2FN
 from typing import Optional
-from transformers.models.bert.modeling_bert import BertEmbeddings, BertEncoder, BertPooler, BertLayer, BertAttention, BertIntermediate, BertOutput, BertSelfAttention, BertSelfOutput
+from transformers.models.bert.modeling_bert import (
+    BertEmbeddings,
+    BertEncoder,
+    BertPooler,
+    BertLayer,
+    BertAttention,
+    BertIntermediate,
+    BertOutput,
+    BertSelfAttention,
+    BertSelfOutput,
+)
 from docmodel.attention import FlashSelfAttention
 from transformers.models.bert.modeling_bert import BertOnlyMLMHead
 
@@ -28,14 +38,13 @@ class DocModelConfig(RobertaConfig):
         super().__init__(**kwargs)
 
 
-
 class CustomLinear(nn.Linear):
-    def __init__(self, *args, init_scale=1., **kwargs):
+    def __init__(self, *args, init_scale=1.0, **kwargs):
         self._init_scale = init_scale
         super().__init__(*args, **kwargs)
-        
+
     def init_weights(self):
-        stdv = 1. / math.sqrt(self.weight.size(1)) * self._init_scale
+        stdv = 1.0 / math.sqrt(self.weight.size(1)) * self._init_scale
         self.weight.data.uniform_(-stdv, stdv)
         if self.bias is not None:
             self.bias.data.uniform_(-stdv, stdv)
@@ -49,13 +58,13 @@ class DocModelEmbeddings(nn.Module):
 
         self.word_embeddings = nn.Embedding(
             config.vocab_size, config.hidden_size, padding_idx=0
-        )  
+        )
         self.position_embeddings = nn.Embedding(
             config.max_position_embeddings, config.hidden_size
         )
         self.expanded_position_embeddings = nn.Embedding(
-            config.max_position_embeddings * 4, 
-            config.hidden_size, 
+            config.max_position_embeddings * 4,
+            config.hidden_size,
         )
         config.max_2d_position_embeddings = 1024
         self.x_position_embeddings = nn.Embedding(
@@ -80,8 +89,10 @@ class DocModelEmbeddings(nn.Module):
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
 
         self.doc_linear1 = CustomLinear(config.hidden_size, config.hidden_size)
-        self.doc_linear2 = CustomLinear(config.hidden_size, config.hidden_size, init_scale=0.1)
-        
+        self.doc_linear2 = CustomLinear(
+            config.hidden_size, config.hidden_size, init_scale=0.1
+        )
+
         self.relu = nn.ReLU()
 
     def forward(
@@ -91,11 +102,11 @@ class DocModelEmbeddings(nn.Module):
         token_type_ids=None,
         position_ids=None,
         inputs_embeds=None,
-    ):  
+    ):
         seq_length = input_ids.size(1)
-        pad_tokens = torch.where(input_ids == 1, 1, 0)
-        percent_pad = pad_tokens.sum() / (input_ids.size(0) * input_ids.size(1))
-        print(f"Percentage padding: {percent_pad.item()}")
+        # pad_tokens = torch.where(input_ids == 1, 1, 0)
+        # percent_pad = pad_tokens.sum() / (input_ids.size(0) * input_ids.size(1))
+        # print(f"PERCENT PAD: {percent_pad:.2f}")
         if position_ids is None:
             position_ids = torch.arange(
                 seq_length, dtype=torch.long, device=input_ids.device
@@ -143,8 +154,8 @@ class DocModelEmbeddings(nn.Module):
         embeddings = self.dropout(embeddings)
         return embeddings
 
-class CustomBertModel(BertModel):
 
+class CustomBertModel(BertModel):
     def __init__(self, config, add_pooling_layer=True):
         super(BertModel, self).__init__(config)
         self.config = config
@@ -159,14 +170,15 @@ class CustomBertModel(BertModel):
 
 
 class CustomBertEncoder(BertEncoder):
-      
     def __init__(self, config):
         super(BertEncoder, self).__init__()
         self.config = config
-        self.layer = nn.ModuleList([CustomBertLayer(config) for _ in range(config.num_hidden_layers)])
+        self.layer = nn.ModuleList(
+            [CustomBertLayer(config) for _ in range(config.num_hidden_layers)]
+        )
         self.gradient_checkpointing = False
 
-    
+
 class CustomBertLayer(BertLayer):
     def __init__(self, config):
         super(BertLayer, self).__init__()
@@ -181,7 +193,9 @@ class CustomBertLayer(BertLayer):
 class CustomBertAttention(BertAttention):
     def __init__(self, config, position_embedding_type=None):
         super(BertAttention, self).__init__()
-        self.self = FlashSelfAttention(config, position_embedding_type=position_embedding_type)
+        self.self = FlashSelfAttention(
+            config, position_embedding_type=position_embedding_type
+        )
         self.output = BertSelfOutput(config)
         self.pruned_heads = set()
 
@@ -208,19 +222,16 @@ class DocModel(CustomBertModel):
         inputs_embeds=None,
         encoder_hidden_states=None,
         encoder_attention_mask=None,
-    ):  
+    ):
         if attention_mask is None:
             attention_mask = torch.ones_like(input_ids)
         if token_type_ids is None:
             token_type_ids = torch.zeros_like(input_ids)
 
-
         embedding_output = self.embeddings(
             input_ids, bbox, position_ids=position_ids, token_type_ids=token_type_ids
         )
-        encoder_outputs = self.encoder(
-            embedding_output, attention_mask, head_mask=None
-        )
+        encoder_outputs = self.encoder(embedding_output, attention_mask, head_mask=None)
         sequence_output = encoder_outputs[0]
         pooled_output = self.pooler(sequence_output)
 
@@ -231,7 +242,6 @@ class DocModel(CustomBertModel):
 
 
 class BertPreTrainedModelCustomInit(BertPreTrainedModel):
-
     def _init_weights(self, module):
         """Initialize the weights"""
         if hasattr(module, "init_weights"):
@@ -250,15 +260,17 @@ class BertPreTrainedModelCustomInit(BertPreTrainedModel):
             module.bias.data.zero_()
             module.weight.data.fill_(1.0)
 
-class DocModelForTokenClassification(BertPreTrainedModelCustomInit):
+
+class RobertaDocModelForTokenClassification(BertPreTrainedModelCustomInit):
     config_class = DocModelConfig
     pretrained_model_archive_map = DOCMODEL_PRETRAINED_MODEL_ARCHIVE_MAP
     base_model_prefix = "bert"
 
     def __init__(self, config):
         super().__init__(config)
+
+        self.roberta = DocModel(config)
         self.num_labels = config.num_labels
-        self.docmodel = DocModel(config)
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
         self.classifier = nn.Linear(config.hidden_size, config.num_labels)
 
@@ -276,7 +288,7 @@ class DocModelForTokenClassification(BertPreTrainedModelCustomInit):
         labels=None,
     ):
 
-        outputs = self.docmodel(
+        outputs = self.roberta(
             input_ids=input_ids,
             bbox=bbox,
             attention_mask=attention_mask,
@@ -305,7 +317,7 @@ class DocModelForTokenClassification(BertPreTrainedModelCustomInit):
                 loss = loss_fct(logits.view(-1, self.num_labels), labels.view(-1))
             outputs = (loss,) + outputs
 
-        return outputs  # (loss), scores, (hidden_states), (attentions)
+        return outputs
 
 
 class MLMHead(nn.Module):
@@ -332,7 +344,6 @@ class MLMHead(nn.Module):
         return hidden_states
 
 
-
 class RobertaDocModelForMLM(BertPreTrainedModelCustomInit):
     config_class = DocModelConfig
     pretrained_model_archive_map = DOCMODEL_PRETRAINED_MODEL_ARCHIVE_MAP
@@ -347,18 +358,13 @@ class RobertaDocModelForMLM(BertPreTrainedModelCustomInit):
         self.init_weights()
 
     def resize_position_embeddings(self, new_num_position_embeddings: int):
+        raise AssertionError("Please don't call this")
         pos_embed = self.roberta.embeddings.position_embeddings.weight
-        self.roberta.embeddings.expanded_position_embeddings.weight = torch.nn.Parameter(
-            data=torch.cat(
-                (
-                    pos_embed,
-                    pos_embed,
-                    pos_embed,
-                    pos_embed
-                ), 
-                dim=0
-            ),
-            requires_grad=True
+        self.roberta.embeddings.expanded_position_embeddings.weight = (
+            torch.nn.Parameter(
+                data=torch.cat((pos_embed, pos_embed, pos_embed, pos_embed), dim=0),
+                requires_grad=True,
+            )
         )
 
     def get_input_embeddings(self):
@@ -410,78 +416,72 @@ class RobertaDocModelForMLM(BertPreTrainedModelCustomInit):
         return outputs  # (masked_lm_loss), (ltr_lm_loss), prediction_scores, (hidden_states), (attentions)
 
 
-class XDocModelForMLM(BertPreTrainedModelCustomInit):
-    config_class = DocModelConfig
-    pretrained_model_archive_map = DOCMODEL_PRETRAINED_MODEL_ARCHIVE_MAP
-    base_model_prefix = "bert"
+# class XDocModelForMLM(BertPreTrainedModelCustomInit):
+#     config_class = DocModelConfig
+#     pretrained_model_archive_map = DOCMODEL_PRETRAINED_MODEL_ARCHIVE_MAP
+#     base_model_prefix = "bert"
 
-    def __init__(self, config):
-        super().__init__(config)
+#     def __init__(self, config):
+#         super().__init__(config)
 
-        self.roberta = DocModel(config)
-        self.cls = BertOnlyMLMHead(config)
+#         self.roberta = DocModel(config)
+#         self.cls = BertOnlyMLMHead(config)
 
-        self.init_weights()
+#         self.init_weights()
 
-    def resize_position_embeddings(self, new_num_position_embeddings: int):
-        pos_embed = self.roberta.embeddings.position_embeddings.weight
-        self.roberta.embeddings.expanded_position_embeddings.weight = torch.nn.Parameter(
-            data=torch.cat(
-                (
-                    pos_embed,
-                    pos_embed,
-                    pos_embed,
-                    pos_embed
-                ), 
-                dim=0
-            ),
-            requires_grad=True
-        )
+#     def resize_position_embeddings(self, new_num_position_embeddings: int):
+#         pos_embed = self.roberta.embeddings.position_embeddings.weight
+#         self.roberta.embeddings.expanded_position_embeddings.weight = (
+#             torch.nn.Parameter(
+#                 data=torch.cat((pos_embed, pos_embed, pos_embed, pos_embed), dim=0),
+#                 requires_grad=True,
+#             )
+#         )
 
-    def get_input_embeddings(self):
-        return self.roberta.embeddings.word_embeddings
-    
-    def get_output_embeddings(self):
-        return self.cls.predictions.decoder
+#     def get_input_embeddings(self):
+#         return self.roberta.embeddings.word_embeddings
 
-    def forward(
-        self,
-        input_ids,
-        bbox,
-        attention_mask=None,
-        token_type_ids=None,
-        position_ids=None,
-        head_mask=None,
-        inputs_embeds=None,
-        labels=None,
-        bbox_labels=None,
-        encoder_hidden_states=None,
-        encoder_attention_mask=None,
-    ):
+#     def get_output_embeddings(self):
+#         return self.cls.predictions.decoder
 
-        outputs = self.roberta(
-            input_ids,
-            bbox,
-            attention_mask=attention_mask,
-            token_type_ids=token_type_ids,
-            position_ids=position_ids,
-            head_mask=head_mask,
-            inputs_embeds=inputs_embeds,
-            encoder_hidden_states=encoder_hidden_states,
-            encoder_attention_mask=encoder_attention_mask,
-        )
+#     def forward(
+#         self,
+#         input_ids,
+#         bbox,
+#         attention_mask=None,
+#         token_type_ids=None,
+#         position_ids=None,
+#         head_mask=None,
+#         inputs_embeds=None,
+#         labels=None,
+#         bbox_labels=None,
+#         encoder_hidden_states=None,
+#         encoder_attention_mask=None,
+#     ):
 
-        sequence_output = outputs[0]
-        prediction_scores = self.cls(sequence_output)
+#         outputs = self.roberta(
+#             input_ids,
+#             bbox,
+#             attention_mask=attention_mask,
+#             token_type_ids=token_type_ids,
+#             position_ids=position_ids,
+#             head_mask=head_mask,
+#             inputs_embeds=inputs_embeds,
+#             encoder_hidden_states=encoder_hidden_states,
+#             encoder_attention_mask=encoder_attention_mask,
+#         )
 
-        outputs = (prediction_scores,) + outputs[
-            2:
-        ]  # Add hidden states and attention if they are here
-        if labels is not None:
-            loss_fct = CrossEntropyLoss()
-            masked_lm_loss = loss_fct(
-                prediction_scores.view(-1, self.config.vocab_size),
-                labels.view(-1),
-            )
-            outputs = (masked_lm_loss,) + outputs
-        return outputs  
+#         sequence_output = outputs[0]
+#         prediction_scores = self.cls(sequence_output)
+
+#         outputs = (prediction_scores,) + outputs[
+#             2:
+#         ]  # Add hidden states and attention if they are here
+#         if labels is not None:
+#             loss_fct = CrossEntropyLoss()
+#             masked_lm_loss = loss_fct(
+#                 prediction_scores.view(-1, self.config.vocab_size),
+#                 labels.view(-1),
+#             )
+#             outputs = (masked_lm_loss,) + outputs
+#         return outputs
