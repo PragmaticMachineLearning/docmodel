@@ -62,6 +62,7 @@ def iou(A, B):
     return iou
 
 
+
 def align_annotations(
     *,
     orig_words,
@@ -89,3 +90,51 @@ def align_annotations(
             label = orig_labels[best_match_idx]
         converted_labels.append(label)
     return new_words, new_boxes, converted_labels, orig_images
+
+
+def use_reading_order(words, bboxes, labels=None, order="default"):
+    if order == "default":
+        result = [words, bboxes]
+        if labels is not None:
+            result.append(labels)
+        return result, np.asarray(list(range(len(words))))
+    elif order == "single_column":
+        arr_bboxes = np.asarray(bboxes)
+        # Use y coordinate as primary, x coordinate as secondary
+        # We first discretize to prevent small variations in the y coordinate
+        # from changing the line a token is assigned to.
+        priority = (arr_bboxes[:, 1] // 10) * 1000 + arr_bboxes[:, 0]
+        resorted_idxs = np.argsort(priority)
+        result = [
+            np.asarray(words)[resorted_idxs].tolist(),
+            np.asarray(bboxes)[resorted_idxs].tolist(),
+        ]
+        if labels is not None:
+            result.append(np.asarray(labels)[resorted_idxs].tolist())
+        return result, resorted_idxs
+    elif order == "random":
+        idxs = list(range(len(words)))
+        # [0, 1, 2, 3, ..., 512]
+        random.shuffle(idxs)
+        # [124, 15, 501, 5, ..., 176]
+        # Get random sort order
+        resorted_idxs = np.asarray(idxs)
+        # ["this", "is", "a", ..., "end"]
+        result = [
+            np.asarray(words)[resorted_idxs].tolist(),
+            np.asarray(bboxes)[resorted_idxs].tolist(),
+        ]
+        if labels is not None:
+            result.append(np.asarray(labels)[resorted_idxs].tolist())
+        return result, resorted_idxs
+    elif order == "random_position":
+        idxs = list(range(len(words)))
+        random.shuffle(idxs)
+        resorted_idxs = np.asarray(idxs)
+        result = [
+            words,
+            np.asarray(bboxes)[resorted_idxs].tolist(),
+        ]
+        if labels is not None:
+            result.append(labels)
+        return result, resorted_idxs

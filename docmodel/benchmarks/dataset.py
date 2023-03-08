@@ -1,8 +1,64 @@
+from typing import Any
 import torch
 from PIL import Image
 from torch.utils.data import Dataset
-from docmodel.etl_utils import normalize_bbox
-from docmodel.dataset import preprocess as docmodel_preprocess
+from docmodel.etl_utils import normalize_bbox, use_reading_order
+from transformers import RobertaTokenizerFast
+
+
+
+tokenizer = RobertaTokenizerFast.from_pretrained('roberta-base', add_prefix_space = True)
+
+def preprocess(page: dict[str, Any], max_length: int =512, chunk_overlap: bool = True, shrink_dtype: bool = True, truncation: bool = True):
+    add_special_tokens = truncation
+
+    encoded_inputs = tokenizer(
+        page["tokens"],
+        padding="max_length",
+        max_length=max_length,
+        return_tensors="pt",
+        truncation=truncation,
+        add_special_tokens=add_special_tokens,
+        return_overflowing_tokens=False,
+        # We use this argument because the texts in our dataset are lists of words (with a label for each word).
+        is_split_into_words=True,
+    )
+    bbox = page["boxes"]
+
+    bbox_inputs = []
+    for word_idx in encoded_inputs.word_ids():
+        # Special tokens don't have position info
+        if word_idx is None:
+            bbox_inputs.append([0, 0, 0, 0])
+        # We set the label for the first token of each word.
+        else:
+            bbox_inputs.append(bbox[word_idx])
+
+    if "labels" in page:
+        # For token classification task
+        labels = []
+        for word_idx in encoded_inputs.word_ids():
+            if word_idx is None:
+                labels.append(-100)
+            else:
+                labels.append(page["labels"][word_idx])
+        encoded_inputs["labels"] = torch.tensor(labels)
+
+    encoded_inputs["bbox"] = torch.tensor(bbox_inputs)
+
+    if shrink_dtype:
+        encoded_inputs["input_ids"] = encoded_inputs["input_ids"].type(torch.int16)
+        encoded_inputs["attention_mask"] = encoded_inputs["attention_mask"].type(
+            torch.bool
+        )
+        encoded_inputs["bbox"] = encoded_inputs["bbox"].type(torch.int16)
+
+    if truncation:
+        assert encoded_inputs.input_ids.shape[-1:] == torch.Size([max_length])
+        assert encoded_inputs.attention_mask.shape[-1:] == torch.Size([max_length])
+        assert encoded_inputs.bbox.shape[-2:] == torch.Size([max_length, 4])
+
+    return encoded_inputs
 
 
 class DocModelSpatialIEDataset(Dataset):
@@ -10,10 +66,10 @@ class DocModelSpatialIEDataset(Dataset):
         self,
         annotations,
         tokenizer=None,
-        max_length=2048,
+        max_length: int =2048,
         label2id=None,
-        reading_order="default",
-        doc_info=True,
+        reading_order: str ="default",
+        doc_info: bool =True,
     ):
         self.words, self.boxes, self.labels, self.images = annotations
         self.tokenizer = tokenizer
@@ -36,9 +92,9 @@ class DocModelSpatialIEDataset(Dataset):
         )
 
         assert len(words) == len(boxes) == len(word_labels)
-        word_label_ids = [self.label2id[label] for label in word_labels]
+        word_label_ids: list[Any] = [self.label2id[label] for label in word_labels]
 
-        payload = {
+        payload: dict[str, list[list[int]] ] = {
             "tokens": words,
             "boxes": [
                 normalize_bbox(
@@ -50,15 +106,16 @@ class DocModelSpatialIEDataset(Dataset):
             ],
             "labels": word_label_ids,
         }
-        encoded_inputs = docmodel_preprocess(
+        encoded_inputs = preprocess(
             payload, max_length=self.max_length, shrink_dtype=False
         )
-
-        del encoded_inputs["overflow_to_sample_mapping"]
+        
+        # del encoded_inputs["overflow_to_sample_mapping"]
 
         # remove batch dimension
         for k, v in encoded_inputs.items():
-            encoded_inputs[k] = v.squeeze()
+            encoded_inputs[k] = v.squeeze(0)
+
 
         assert encoded_inputs.input_ids.shape == torch.Size([self.max_length])
         assert encoded_inputs.attention_mask.shape == torch.Size([self.max_length])

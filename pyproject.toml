@@ -1,15 +1,16 @@
 [tool.poetry]
-name = "doc-model"
+name = "docmodel"
 version = "0.1.0"
-description = "Unified pre-training for document understanding"
-authors = ["Madison May <madisonmay@indico.io>", "tobiadefami <tobiadefami@gmail.com>"]
+description = "document understanding model for certain tasks"
+authors = ["tobiadefami <tobiadefami@gmail.com>"]
 license = "MIT"
 readme = "README.md"
-packages = [{include = "doc_model"}]
 
 [tool.poetry.dependencies]
 python = "^3.10"
-
+protobuf = "^3.9.2"
+seaborn = "^0.12.2"
+datasets = "^2.10.1"
 
 [build-system]
 requires = ["poetry-core"]

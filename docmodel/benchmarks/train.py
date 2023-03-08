@@ -53,8 +53,11 @@ docmodel_tokenizer = RobertaTokenizerFast.from_pretrained(
 )
 
 
+
+
 class LabelMap:
     label_map = None
+
 
 
 def metrics(eval_preds):
@@ -218,7 +221,7 @@ def main(
             )
         elif base_model == "docmodel":
             model = RobertaDocModelForTokenClassification.from_pretrained(
-                checkpoint, num_labels=len(labels)
+                "/home/chief/Downloads/model", num_labels=len(labels)
             )
         else:
             raise ValueError(f"Unknown base_model setting: {base_model}")
