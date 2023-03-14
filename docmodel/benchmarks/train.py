@@ -2,15 +2,9 @@ import os
 import random
 import warnings
 import faulthandler
-
+from typing import Any
 
 faulthandler.enable()
-
-# from docrep.modeling_layoutlmv2 import (
-#     FusionInEncoderForTokenClassification,
-#     DocRepForTokenClassification,
-# )
-# from docrep.configuration_layoutlmv2 import DocRepConfig
 
 warnings.filterwarnings("ignore")
 import os
@@ -19,45 +13,60 @@ import wandb
 import fire
 import numpy as np
 import pandas as pd
-import torch
-from PIL import Image
 from transformers import LayoutLMv3ForTokenClassification
 from transformers import LayoutLMv3Config, LayoutLMv3Tokenizer
 from transformers import LayoutLMv3Processor
 from transformers import TrainingArguments
-# from docrep.processing_layoutlmv2 import LayoutLMv2Processor
-# from docrep.modeling_layoutlmv2 import (
-#     LayoutLMv2ForTokenClassification,
-# )
 from docmodel.benchmarks.trainer import CustomTrainer as Trainer
 from docmodel.benchmarks.visualizer import visualize_prediction
 from docmodel.benchmarks.dataset import DocModelSpatialIEDataset, SpatialIEDataset
-from transformers import RobertaForTokenClassification
 from seqeval.metrics import (
     classification_report,
     f1_score,
-   
     precision_score,
     recall_score,
 )
-from torch.utils.data import Dataset
 from ray import tune
 
-# from docrep.etl_utils import use_reading_order
-from transformers import LayoutLMv2Tokenizer, RobertaTokenizerFast
-from docmodel.doc_model import RobertaDocModelForTokenClassification
-
+from transformers import RobertaTokenizerFast
+from docmodel.doc_model import RobertaDocModelForTokenClassification, DocModelConfig
 tokenizer = LayoutLMv3Tokenizer.from_pretrained("microsoft/layoutlmv3-base")
 docmodel_tokenizer = RobertaTokenizerFast.from_pretrained(
     "roberta-base", add_prefix_space=True
 )
 
 
+MODEL_CONFIG = {
+    "docmodel": {
+        "model": RobertaDocModelForTokenClassification,
+        "config": DocModelConfig,
+        "dataset": DocModelSpatialIEDataset,
+        "max_length": 2048,
+        "gradient_accumulation_steps": 8,
+        "tokenizer": docmodel_tokenizer,
+        "tokenizer_kwargs": {"pretrained_model_name_or_path": "roberta-base"},
+        "collator_kwargs": {"include_2d_data": True, "pad_to_multiple_of": 128},
+        "pretrained_checkpoint": "../docmodel_weights",
+    },
+    "layoutlmv3": {
+        "model": LayoutLMv3ForTokenClassification,
+        "config": LayoutLMv3Config,
+        "dataset": SpatialIEDataset,
+        "processor": LayoutLMv3Processor,
+        "max_length": 2048,
+        "gradient_accumulation_steps": 8,
+        "tokenizer": tokenizer,
+        "tokenizer_kwargs": {
+            "pretrained_model_name_or_path": "microsoft/layoutlmv3-base"
+        },
+        "collator_kwargs": {"include_2d_data": True, "pad_to_multiple_of": 128},
+        "pretrained_checkpoint": "microsoft/layoutlmv3-base",
+    },
+}
 
 
 class LabelMap:
     label_map = None
-
 
 
 def metrics(eval_preds):
@@ -100,23 +109,23 @@ def text_from_words(words, bbox):
 
 
 def main(
-    base_model="layoutlmv3",
-    checkpoint="microsoft/layoutlmv3-base",
-    dataset="SROIE",
-    model_name=None,
-    reading_order="default",
-    sweep_parameters=False,
-    n_trials=10,
-    n_epochs=5,
-    batch_size=2,
-    max_length=512,
-    learning_rate=1e-5,
-    gradient_accumulation_steps=1,
-    doc_info=True,
-    from_scratch=False,
-    ocr="default",
-    seed=None,
-    only_label_first_subword=False,
+    base_model:str="layoutlmv3",
+    checkpoint: str|Any = None,
+    dataset: str="SROIE",
+    model_name: str|Any = None,
+    reading_order: str = "default",
+    sweep_parameters: bool = False,
+    n_trials: int = 10,
+    n_epochs: int = 5,
+    batch_size: int = 2,
+    max_length: int = 512,
+    learning_rate: float = 1e-5,
+    gradient_accumulation_steps: int =1,
+    doc_info: bool =True,
+    from_scratch: bool =False,
+    ocr: str ="default",
+    seed: int|Any =None,
+    only_label_first_subword: bool =False,
 ):
     if seed:
         # Doesn't actually do what it should, but just want to get something running
@@ -124,7 +133,16 @@ def main(
 
     if model_name is None:
         model_name = str(int(time.time()))
-    print(f"Using base model: {checkpoint}")
+
+    model_config: dict[str, Any] = MODEL_CONFIG[base_model]
+    pretrained_checkpoint: str | Any | None = model_config.get(
+        "pretrained_checkpoint"
+    )
+    dataset_cls = model_config["dataset"]
+    model_cls = model_config["model"]
+    cfg = model_config["config"]
+
+    print(f"Using base model: {pretrained_checkpoint}")
     print(f"Training model `{model_name}` on dataset {dataset}")
 
     _, _, train_labels, _ = train = pd.read_pickle(f"{dataset}/data/{ocr}/train.pkl")
@@ -142,15 +160,17 @@ def main(
     # Global state is a bit gross but I'm not sure how to inject
     # this into the compute_metrics function otherwise
     LabelMap.label_map = id2label
+    
 
-    if base_model != "docmodel":
-        processor = LayoutLMv3Processor.from_pretrained(
-            "microsoft/layoutlmv3-base",
+    if base_model != 'docmodel':
+        processor_cls = model_config.get("processor")
+        processor = processor_cls.from_pretrained(
+            pretrained_checkpoint,
             apply_ocr=False,
             only_label_first_subword=only_label_first_subword,
         )
 
-        train_dataset = SpatialIEDataset(
+        train_dataset = dataset_cls(
             annotations=train,
             processor=processor,
             label2id=label2id,
@@ -158,7 +178,7 @@ def main(
             max_length=max_length,
             doc_info=doc_info,
         )
-        test_dataset = SpatialIEDataset(
+        test_dataset = dataset_cls(
             annotations=test,
             processor=processor,
             label2id=label2id,
@@ -167,64 +187,31 @@ def main(
             doc_info=doc_info,
         )
     else:
-        train_dataset = DocModelSpatialIEDataset(
+        train_dataset = dataset_cls(
             annotations=train,
-            tokenizer=docmodel_tokenizer,
             label2id=label2id,
             reading_order=reading_order,
             max_length=max_length,
             doc_info=doc_info,
         )
-        test_dataset = DocModelSpatialIEDataset(
+        test_dataset = dataset_cls(
             annotations=test,
-            tokenizer=docmodel_tokenizer,
             label2id=label2id,
             reading_order=reading_order,
             max_length=max_length,
             doc_info=doc_info,
         )
 
-    # import ipdb; ipdb.set_trace()
     def model_init():
-        if base_model == "layoutlmv3":
-            if from_scratch:
-                model = LayoutLMv3ForTokenClassification(
-                    config=LayoutLMv3Config(), num_labels=len(labels)
-                )
-            else:
-                model = LayoutLMv3ForTokenClassification.from_pretrained(
-                    checkpoint, num_labels=len(labels)
-                )
-        elif base_model == "fusion-in-encoder":
-            if from_scratch:
-                model = FusionInEncoderForTokenClassification(
-                    config=LayoutLMv3Config(max_length=max_length),
-                    num_labels=len(labels),
-                )
-            else:
-                model = FusionInEncoderForTokenClassification.from_pretrained(
-                    checkpoint, num_labels=len(labels)
-                )
 
-        elif base_model == "docrep":
-            if from_scratch:
-                model = DocRepForTokenClassification(
-                    config=DocRepConfig(max_length=max_length)
-                )
-            else:
-                model = DocRepForTokenClassification.from_pretrained(
-                    checkpoint, num_labels=len(labels)
-                )
-        elif base_model == "roberta":
-            model = RobertaForTokenClassification.from_pretrained(
-                checkpoint, num_labels=len(labels)
-            )
-        elif base_model == "docmodel":
-            model = RobertaDocModelForTokenClassification.from_pretrained(
-                "/home/chief/Downloads/model", num_labels=len(labels)
-            )
+        if from_scratch:
+            print("Training from random init")
+            model = model_cls(config=cfg, num_labels=len(labels))
         else:
-            raise ValueError(f"Unknown base_model setting: {base_model}")
+            print(f"Training from pretrained model -- {base_model.upper()}")
+            model = model_cls.from_pretrained(
+                pretrained_checkpoint, num_labels=len(labels)
+            )
 
         model.id2label = id2label
         model.label2id = label2id
@@ -293,9 +280,9 @@ def main(
 
         img.save(os.path.join(pred_folder, os.path.basename(image_path)))
         wandb.log({"sample-result": wandb.Image(img)})
-        
+
         # TODO: add newlines where appropriate
-        
+
         text = text_from_words(words, bbox=example["bbox"].squeeze(0))
         wandb.log(
             {"sample-text": text_from_words(words, bbox=example["bbox"].squeeze(0))}
