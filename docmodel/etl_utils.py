@@ -62,6 +62,7 @@ def iou(A, B):
     return iou
 
 
+
 def align_annotations(
     *,
     orig_words,
