@@ -1,58 +1,94 @@
 from dataset import DocModelDataset
-from collator import DataCollatorForWholeWordMask
 import fire
-import torch
-from docmodel.doc_model import RobertaDocModelForMLM, DocModelConfig
 from transformers import RobertaTokenizerFast
-from transformers import Trainer, AutoConfig
+from collections import defaultdict
+import matplotlib.pyplot as plt
+from tqdm import tqdm
+import numpy as np
 
 
 MODEL_CONFIG = {
     "doc-model-roberta": {
-        "model": RobertaDocModelForMLM,
-        "config": DocModelConfig,
         "dataset": DocModelDataset,
         "max_length": 2048,
-        "gradient_accumulation_steps": 8,
         "tokenizer": RobertaTokenizerFast.from_pretrained,
         "tokenizer_kwargs": {"pretrained_model_name_or_path": "roberta-base"},
-        "collator_kwargs": {"include_2d_data": True, "pad_to_multiple_of": 128},
-        "pretrained_checkpoint": "roberta-base",
     },
 }
 
+def redundancy(text):
+    words = text.split()
+    if not words:
+        return 0
+    return len(words) / len(set(words))
 
+def avg_word_length(text):
+    words = text.split()
+    if not words:
+        return 0
+    return sum(len(word) for word in words) / len(words)
+
+SCORE_FNS = {
+ "avg-word-length": avg_word_length,   
+ "redundancy": redundancy,
+}
+    
 def main(
     data_dir=None,
-    mlm_proba=0.15,
-    max_length=None,
-    batch_size=8,
-    pretrained_checkpoint=None,
     base_model="doc-model-roberta",
+    n = 5,
 ):
     model_config = MODEL_CONFIG[base_model]
-    pretrained_checkpoint = pretrained_checkpoint or model_config.get(
-        "pretrained_checkpoint"
-    )
-    print("Training from pre-trained model")
     tokenizer = model_config["tokenizer"](
         model_max_length=model_config["max_length"], **model_config["tokenizer_kwargs"]
-    )
-    collator_kwargs = model_config.get("collator_kwargs", {})
-    collator = DataCollatorForWholeWordMask(
-        tokenizer=tokenizer, mlm_probability=mlm_proba, **collator_kwargs
     )
     dataset_cls = model_config["dataset"]
     dataset = dataset_cls(
         directory=data_dir,
         split="train",
-        max_length=(max_length or model_config["max_length"]),
+        max_length=model_config["max_length"],
         reading_order="default",
     )
-    for batch_start in range(0, len(dataset), batch_size):
-        batch_end = batch_start + batch_size
-        batch = [dataset[i] for i in range(batch_start, batch_end)]
-        collator(batch)
+
+    scores_by_score_fn = defaultdict(list)
+    for score_fn_name, score_fn in SCORE_FNS.items():
+        for example_idx in tqdm(list(range(len(dataset)))):
+            example = dataset[example_idx]
+            text = tokenizer.decode(example["input_ids"], skip_special_tokens=True)
+            score = score_fn(text)
+            scores_by_score_fn[score_fn_name].append(score)
+
+    for score_fn_name, scores in scores_by_score_fn.items():
+        print("SCORE FUNCTION: ", score_fn_name)
+        # Plot data distribution
+        plt.hist(scores, bins=100)
+        plt.title(score_fn_name)
+        plt.savefig(f"{score_fn_name}.png")
+        plt.clf()
+
+
+        num_scores = len(scores)
+        sorted_score_idxs = np.argsort(scores)
+        top_n_scores = reversed(sorted_score_idxs[-n:])
+        bottom_n_scores = sorted_score_idxs[:n]
+
+        # Print bottom 5
+        print(f"Bottom {n} {score_fn_name}")
+        for rank, idx in enumerate(bottom_n_scores):
+            example = dataset[idx]
+            text = tokenizer.decode(example["input_ids"], skip_special_tokens=True)
+            print(f"Score: {scores[idx]}, Percentile: {(rank / num_scores) * 100:.3f}")
+            print(text)
+            print()
+        
+        # Print top 5
+        print(f"Top {n} {score_fn_name}")
+        for rank, idx in enumerate(top_n_scores):
+            example = dataset[idx]
+            text = tokenizer.decode(example["input_ids"], skip_special_tokens=True)
+            print(f"Score: {scores[idx]}, Percentile: {((num_scores - rank) / num_scores) * 100:.3f}")
+            print(text)
+            print()
 
 
 if __name__ == "__main__":
