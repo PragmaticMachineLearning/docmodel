@@ -5,6 +5,7 @@ from collections import defaultdict
 import matplotlib.pyplot as plt
 from tqdm import tqdm
 import numpy as np
+import json
 
 
 MODEL_CONFIG = {
@@ -12,9 +13,16 @@ MODEL_CONFIG = {
         "dataset": DocModelDataset,
         "max_length": 2048,
         "tokenizer": RobertaTokenizerFast.from_pretrained,
-        "tokenizer_kwargs": {"pretrained_model_name_or_path": "roberta-base"},
+        "tokenizer_kwargs": {"pretrained_model_name_or_path": "roberta-base", "local_files_only":True},
     },
 }
+def word_freq(freq_file):
+
+    with open(freq_file, 'r') as f:
+        
+        data = json.load(f)
+
+    return data
 
 def redundancy(text):
     words = text.split()
@@ -28,9 +36,32 @@ def avg_word_length(text):
         return 0
     return sum(len(word) for word in words) / len(words)
 
+
+WORD_FREQ = word_freq("word_freq.json")
+
+
+def word_freq_per_example(text):
+    
+    words = text.split()
+
+    if not words: 
+        return 0
+
+    avg = 0
+    for word in words:
+        if word not in WORD_FREQ:
+            print(f"{word.upper()} IS MISSING!")
+            avg += 1/len(words)
+        else:
+            avg += WORD_FREQ[word] / len(words)
+    
+    return avg
+
+
 SCORE_FNS = {
  "avg-word-length": avg_word_length,   
  "redundancy": redundancy,
+ "word_frequency": word_freq_per_example
 }
     
 def main(
@@ -57,7 +88,7 @@ def main(
             text = tokenizer.decode(example["input_ids"], skip_special_tokens=True)
             score = score_fn(text)
             scores_by_score_fn[score_fn_name].append(score)
-
+       
     for score_fn_name, scores in scores_by_score_fn.items():
         print("SCORE FUNCTION: ", score_fn_name)
         # Plot data distribution
