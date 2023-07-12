@@ -1,19 +1,19 @@
-from base64 import encode
 import glob
 import io
 import os
 import random
+from base64 import encode
 
-import torch
 import numpy as np
-import PIL
-from transformers import RobertaTokenizerFast
+import torch
+from PIL import Image
 from torch.utils.data import Dataset
+from transformers import RobertaTokenizerFast
 
 # Stackoverflow magic number -- not sure if this is the absolute max or not
-PIL.Image.MAX_IMAGE_PIXELS = 933120000
+Image.MAX_IMAGE_PIXELS = 933120000
 
-tokenizer = RobertaTokenizerFast.from_pretrained("roberta-base", add_prefix_space=True)
+tokenizer = RobertaTokenizerFast.from_pretrained("roberta-base", add_prefix_space=True, local_files_only=True)
 
 
 def preprocess(page, max_length=512, chunk_overlap=True, shrink_dtype=True):

@@ -1,9 +1,11 @@
-from dataset import DocModelDataset
-import fire
-from transformers import RobertaTokenizerFast
-from collections import defaultdict
 import json
+from collections import defaultdict
+
+import fire
 import tqdm
+from transformers import RobertaTokenizerFast
+
+from dataset import DocModelDataset
 
 MODEL_CONFIG = {
     "doc-model-roberta": {
@@ -48,7 +50,7 @@ def main(
         reading_order="default")
     
 
-    global_word_count = defaultdict(int)
+    global_word_count: dict[str, int] = defaultdict(int)
     
     for example in dataset:
         example_text = tokenizer.decode(example["input_ids"], skip_special_tokens=True)
