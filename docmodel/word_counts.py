@@ -42,24 +42,27 @@ def main(
     )
 
     dataset_cls = model_config["dataset"]
-    
-    dataset = dataset_cls(
-        directory=data_dir,
-        split="train",
-        max_length=model_config["max_length"],
-        reading_order="default")
-    
+   
+    splits = ['train', 'test', 'valid']
+    for split in splits:
+        dataset = dataset_cls(
+            directory=data_dir,
+            split=split,
+            max_length=model_config["max_length"],
+            reading_order="default")
+        
 
-    global_word_count: dict[str, int] = defaultdict(int)
-    
-    for example in dataset:
-        example_text = tokenizer.decode(example["input_ids"], skip_special_tokens=True)
-        word_count = word_counts(example_text)
-        for word, count in word_count.items():
-            global_word_count[word] += count
+        global_word_count: dict[str, int] = defaultdict(int)
+        
+        for example in dataset:
+            example_text = tokenizer.decode(example["input_ids"], skip_special_tokens=True)
+            word_count = word_counts(example_text)
+            for word, count in word_count.items():
+                global_word_count[word] += count
 
-    with open(output_file, "w") as f:
-        json.dump(dict(global_word_count), f)
+        output = f"{output_file}-{split}.json"
+        with open(output, "w") as f:
+            json.dump(dict(global_word_count), f)
 
 
 if __name__ == "__main__":

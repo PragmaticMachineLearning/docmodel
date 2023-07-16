@@ -1,16 +1,16 @@
 import json
-import time
 from collections import defaultdict
 from typing import Any
 
 import fire
 import matplotlib.pyplot as plt
-import numpy as np
 import pandas as pd
 from tqdm import tqdm
 from transformers import RobertaTokenizerFast
 
 from dataset import DocModelDataset
+from filtering_fns import redundancy, avg_word_length, word_freq_per_example
+
 
 MODEL_CONFIG = {
     "doc-model-roberta": {
@@ -25,91 +25,6 @@ MODEL_CONFIG = {
 }
 
 
-def load_word_freq(freq_file):
-    with open(freq_file, "r") as f:
-        data = json.load(f)
-    return data
-
-
-def redundancy(text):
-    words = text.split()
-    if not words:
-        return 0
-    return len(words) / len(set(words))
-
-
-def avg_word_length(text):
-    words = text.split()
-    if not words:
-        return 0
-    return sum(len(word) for word in words) / len(words)
-
-
-WORD_FREQ = load_word_freq("word_freq.json")
-
-def timeit(f):
-    def modified_f(*args, **kwargs):
-        start = time.time()
-        output = f(*args, **kwargs)
-        end = time.time()
-        print(f"Time to run {f.__name__}: {end - start:.3f}")
-        return output
-    return modified_f
-
-
-@timeit
-def word_freq_per_example(text: str):
-    words: list[str] = text.split()
-
-    if not words:
-        return 0
-
-    total_words = len(words)
-    avg_word_freq = sum(
-        WORD_FREQ[word] for word in words if word in WORD_FREQ
-    )/total_words
-    missing_words: list[str] = [word for word in words if word not in WORD_FREQ]
-    if missing_words:
-        print(f"MISSING WORDS: {''.join(missing_words)}")
-    avg_word_freq += len(missing_words) / total_words
-    return avg_word_freq
-
-# What if we had a function that:
-# - Takes in a function
-# - Returns a function that does everything the original function did
-#   but also prints the time it took to run
-
-
-# def filter_dataset_by_frequency(
-#     dataset: list[dict[str, int]],
-#     tokenizer: str,
-#     frequency_threshold: int,
-# ) -> list[dict[str, int]]:
-    
-#     filtered_dataset: list[dict[str, int]] = []
-
-#     for example in dataset:
-#         text = tokenizer.decode(example["input_ids"], skip_special_tokens=True)
-#         words: list[str] = text.split()
-
-#         filtered_words: list[str] = [
-#             word
-#             for word in words
-#             if word in WORD_FREQ and WORD_FREQ[word] >= frequency_threshold
-#         ]
-#         filtered_text = " ".join(filtered_words)
-
-#         filtered_example: dict[str, int] = {
-#             "input_ids": tokenizer.encode(
-#                 filtered_text, add_special_tokens=True, truncation=True
-#             )
-#         }
-
-#         filtered_dataset.append(filtered_example)
-
-#     return filtered_dataset
-
-
 SCORE_FNS = {
     "avg-word-length": avg_word_length,
     "redundancy": redundancy,
@@ -121,7 +36,6 @@ def main(
     data_dir=None,
     base_model: str="doc-model-roberta",
     n: int=5,
-    frequency_threshold: int=3,
 
     
 ):
