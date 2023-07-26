@@ -1,12 +1,13 @@
 import json
 import shutil
 import time
-from typing import Any, Callable
+from typing import Callable
 import os
 import fire
 from transformers import RobertaTokenizerFast
 from dataset import DocModelDataset
 from filtering_fns import WORD_FREQ, avg_word_length, redundancy
+import math
 
 MODEL_CONFIG = {
     "doc-model-roberta": {
@@ -66,10 +67,10 @@ SCORE_FUNCTIONS: dict[str, Callable] = {
 }
 
 SCORE_THRESHOLDS: dict[str, list[tuple[float, float]]] = {
-    # A dictionary of dummy thresholds to test the filtering function
-    "avg_word_length": [(1.5, 10.0)],
-    "redundancy": [(0.1, 5.0)],
-    "word_frequency": [(2.0, 4.0)],
+    # A dictionary of thresholds to test the filtering function
+    "avg_word_length": [(1.0, 16.0)],
+    "redundancy": [(1.0, math.inf)],
+    "word_frequency": [(35, math.inf)],
 }
 
 
@@ -80,9 +81,7 @@ def filter_dataset_by_metrics(
     should_include = True
     for metric, thresholds in SCORE_THRESHOLDS.items():
         score_fn = SCORE_FUNCTIONS[metric]
-        score = score_fn(
-            text, num_examples
-        )
+        score = score_fn(text, num_examples)
         if not all(
             lower_threshold <= score <= upper_threshold
             for lower_threshold, upper_threshold in thresholds
