@@ -43,13 +43,11 @@ DocModel can be used for a variety of document understanding tasks, including:
 
 ### Model Availability
 
-Model Hub: DocModel on Hugging Face
-Repository: GitHub Repository
+Model Hub: DocModel on [Hugging Face Hub](https://huggingface.co/tobiadefami/docmodel-base)
+
 
 ### License
 This project is licensed under the Mozilla Public License 2.0. See the LICENSE file for details.
 
 ### Contact
-For any questions or inquiries, feel free to reach out to:
-
-GitHub: tobiadefami
+For any questions or inquiries, feel free to reach out!
