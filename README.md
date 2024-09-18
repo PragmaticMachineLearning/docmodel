@@ -16,7 +16,8 @@ DocModel has been evaluated on the FUNSD dataset, achieving competitive results 
 
 **F1-Score: 0.84126**
 
-Installation
+### Installation
+
 To install and use DocModel, follow these steps:
 
 1. Clone the repository:
@@ -48,7 +49,9 @@ Model Hub: DocModel on [Hugging Face Hub](https://huggingface.co/tobiadefami/doc
 
 
 ### License
+
 This project is licensed under the Mozilla Public License 2.0. See the LICENSE file for details.
 
 ### Contact
+
 For any questions or inquiries, feel free to reach out!
