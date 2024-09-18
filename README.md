@@ -12,8 +12,9 @@ Fine-tuned for Document Understanding: Specifically trained on datasets like FUN
 
 DocModel has been evaluated on the FUNSD dataset, achieving competitive results in extracting meaningful information from challenging, real-world documents.
 
-Evaluation Loss: 1.36752
-F1-Score: 0.84126
+**Evaluation Loss: 1.36752**
+
+**F1-Score: 0.84126**
 
 Installation
 To install and use DocModel, follow these steps:
